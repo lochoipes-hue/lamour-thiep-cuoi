@@ -12,21 +12,21 @@ import {
   NGU_HANH_DATA,
   getTrialState,
   createInvitationFromTemplate,
-} from './data.js?v=12';
+} from './data.js?v=13';
 import {
   EDITORIAL_SAMPLE_PHOTOS,
   getWaxSealSvg,
   getCoverFiligreeFrameSvg,
   resolveBackdropUrl,
-} from './artwork.js?v=12';
-import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=12';
-import { storage, isStrictGmail } from './storage.js?v=12';
-import { InvitationRenderer, escapeHtml } from './renderer.js?v=12';
-import { StudioEditor, buildAbsoluteUrl } from './studio.js?v=12';
-import { AdminManagementCenter } from './admin-center.js?v=12';
-import { musicEngine } from './audio-fx.js?v=12';
-import { icon } from './icons.js?v=12';
-import { initGlobalWebFx, bindInteractiveTiltCards, bindScrollStagger } from './web-fx.js?v=12';
+} from './artwork.js?v=13';
+import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=13';
+import { storage, isStrictGmail, sanitizeVnPhone10, validateVnPhone10, isValidVnPhone10 } from './storage.js?v=13';
+import { InvitationRenderer, escapeHtml } from './renderer.js?v=13';
+import { StudioEditor, buildAbsoluteUrl } from './studio.js?v=13';
+import { AdminManagementCenter } from './admin-center.js?v=13';
+import { musicEngine } from './audio-fx.js?v=13';
+import { icon } from './icons.js?v=13';
+import { initGlobalWebFx, bindInteractiveTiltCards, bindScrollStagger } from './web-fx.js?v=13';
 
 const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modal-root');
@@ -58,13 +58,15 @@ function normalizePromptKey(str) {
 }
 
 function sanitizePhoneDigits(val) {
-  return String(val || '').replace(/\D/g, '').slice(0, 11);
+  return sanitizeVnPhone10(val);
 }
 
 function isValidPhoneDigits(val) {
-  const raw = String(val || '').trim();
-  const digits = raw.replace(/\D/g, '');
-  return digits.length >= 9 && digits.length <= 11 && /^[0-9\s]+$/.test(raw);
+  return isValidVnPhone10(val);
+}
+
+function getPhoneErrorMsg(val) {
+  return validateVnPhone10(val).error;
 }
 
 function bindNumericPhoneInputs(rootEl) {
@@ -400,8 +402,8 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
         <form id="auth-login-form">
           ${loginMethod === 'phone' ? `
             <div class="form-group">
-              <label>Số điện thoại (bắt buộc chỉ nhập số, 9–11 chữ số) *</label>
-              <input class="input" type="tel" inputmode="numeric" pattern="[0-9]{9,11}" maxlength="11" data-numeric-phone name="identifier" required placeholder="VD: 0912345678" autocomplete="tel" />
+              <label>Số điện thoại (bắt buộc đúng 10 chữ số) *</label>
+              <input class="input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone name="identifier" required placeholder="VD: 0912345678" autocomplete="tel" />
             </div>
           ` : `
             <div class="form-group">
@@ -440,9 +442,9 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
                 </div>
               </div>
             ` : ''}
-            <div class="form-group"><label>Số điện thoại / Zalo (chỉ nhập số)</label><input class="input" type="tel" inputmode="numeric" maxlength="11" data-numeric-phone name="phone" placeholder="09xxxxxxxx" autocomplete="tel" /></div>
+            <div class="form-group"><label>Số điện thoại / Zalo (10 chữ số)</label><input class="input" type="tel" inputmode="numeric" maxlength="10" data-numeric-phone name="phone" placeholder="VD: 0912345678" autocomplete="tel" /></div>
           ` : `
-            <div class="form-group"><label>Số điện thoại (bắt buộc chỉ nhập số, 9–11 chữ số) *</label><input class="input" type="tel" inputmode="numeric" pattern="[0-9]{9,11}" maxlength="11" data-numeric-phone name="phone" required placeholder="VD: 0912345678" autocomplete="tel" /></div>
+            <div class="form-group"><label>Số điện thoại (bắt buộc đúng 10 chữ số) *</label><input class="input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone name="phone" required placeholder="VD: 0912345678" autocomplete="tel" /></div>
             <div class="form-group"><label>Gmail đã tạo (tùy chọn — đúng @gmail.com)</label><input class="input" type="email" name="email" placeholder="tenban@gmail.com" autocomplete="email" /></div>
           `}
           <div class="form-group"><label>Mật khẩu (tối thiểu 6 ký tự) *</label><input class="input" type="password" name="password" required minlength="6" placeholder="Tạo mật khẩu..." autocomplete="new-password" /></div>
@@ -485,7 +487,7 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
       const fd = new FormData(e.target);
       const rawIdent = fd.get('identifier').toString().trim();
       if (loginMethod === 'phone' && !isValidPhoneDigits(rawIdent)) {
-        showToast('Đăng nhập bằng số điện thoại bắt buộc chỉ nhập số (9–11 chữ số)', 'error');
+        showToast(getPhoneErrorMsg(rawIdent), 'error');
         return;
       }
       if (loginMethod === 'gmail' && !isStrictGmail(rawIdent)) {
@@ -527,7 +529,7 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
         }
       }
       if (regProvider === 'phone' && !isValidPhoneDigits(rawPhone)) {
-        showToast('Số điện thoại bắt buộc chỉ nhập số (9–11 chữ số)', 'error');
+        showToast(getPhoneErrorMsg(rawPhone), 'error');
         return;
       }
       if (regProvider === 'phone' && rawEmail && !isStrictGmail(rawEmail)) {
@@ -535,7 +537,7 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
         return;
       }
       if (rawPhone && !isValidPhoneDigits(rawPhone)) {
-        showToast('Số điện thoại chỉ được nhập chữ số (9–11 số)', 'error');
+        showToast(getPhoneErrorMsg(rawPhone), 'error');
         return;
       }
       try {
@@ -567,18 +569,26 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
 function openBookingModal(settings = {}) {
   const u = storage.currentUser;
   const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const initialPhone = sanitizePhoneDigits(u?.phone || '');
   openModal(`
     <div class="modal-head">
       <div>
         <h3>Đặt Lịch Tư Vấn &amp; Thiết Kế Thiệp</h3>
-        <small style="color:var(--ui-muted);">Chọn ngày giờ thuận tiện — tư vấn viên sẽ chủ động liên hệ qua Zalo/SĐT ${escapeHtml(settings.hotline || '0354 248 177')}</small>
+        <small style="color:var(--ui-muted);">Yêu cầu bắt buộc SĐT Việt Nam đủ 10 số hợp lệ — tư vấn viên liên hệ qua Zalo/SĐT ${escapeHtml(settings.hotline || '0354 248 177')}</small>
       </div>
       <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
     </div>
-    <form id="public-booking-form">
+    <form id="public-booking-form" novalidate>
       <div class="grid-2">
-        <div class="form-group"><label>Họ tên của bạn *</label><input class="input" name="name" required value="${escapeHtml(u?.name || '')}" placeholder="VD: Minh Quân" /></div>
-        <div class="form-group"><label>Số điện thoại / Zalo (chỉ nhập số) *</label><input class="input" type="tel" inputmode="numeric" pattern="[0-9]{9,11}" maxlength="11" data-numeric-phone name="phone" required value="${escapeHtml(sanitizePhoneDigits(u?.phone || ''))}" placeholder="09xxxxxxxx" /></div>
+        <div class="form-group">
+          <label>Họ tên của bạn *</label>
+          <input class="input" id="bk-name-input" name="name" required value="${escapeHtml(u?.name || '')}" placeholder="VD: Minh Quân" autocomplete="name" />
+        </div>
+        <div class="form-group">
+          <label>Số điện thoại / Zalo (bắt buộc đủ 10 số) *</label>
+          <input class="input" id="bk-phone-input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone name="phone" required value="${escapeHtml(initialPhone)}" placeholder="VD: 0912345678" autocomplete="tel" />
+          <small id="bk-phone-hint" style="display:block;margin-top:4px;font-size:11.5px;color:var(--ui-muted);">Bắt buộc nhập đúng 10 chữ số (đầu số VN: 03x, 05x, 07x, 08x, 09x)</small>
+        </div>
       </div>
       <div class="grid-3">
         <div class="form-group"><label>Ngày hẹn *</label><input class="input" type="date" name="date" required value="${tomorrow}" /></div>
@@ -603,40 +613,83 @@ function openBookingModal(settings = {}) {
         <label>Nhu cầu của bạn</label>
         <select class="select" name="service">
           <option value="Tư vấn chọn mẫu & màu hợp mệnh Ngũ Hành">Tư vấn chọn mẫu &amp; màu hợp mệnh Ngũ Hành</option>
-          <option value="Thiết kế thiệp riêng theo bộ ảnh cưới (Gói 599k)">Thiết kế thiệp riêng theo bộ ảnh cưới (Gói 599k)</option>
-          <option value="Tư vấn gói Tiêu Chuẩn 3D / Cao Cấp Phong Thủy">Tư vấn gói Tiêu Chuẩn 3D / Cao Cấp Phong Thủy</option>
+          <option value="Thiết kế thiệp riêng theo bộ ảnh cưới (Gói 499k)">Thiết kế thiệp riêng theo bộ ảnh cưới (Gói 499k)</option>
+          <option value="Tư vấn gói Tiêu Chuẩn 189k / Cao Cấp 299k">Tư vấn gói Tiêu Chuẩn 189k / Cao Cấp 299k</option>
           <option value="Cần hỗ trợ nhập nội dung & tạo link khách mời">Cần hỗ trợ nhập nội dung &amp; tạo link khách mời</option>
         </select>
       </div>
       <div class="form-group"><label>Ghi chú thêm (năm sinh cô dâu chú rể, ngày cưới...)</label><textarea class="textarea" rows="2" name="note" placeholder="VD: Ngày cưới 20/12, chú rể 1996, cô dâu 1998..."></textarea></div>
-      <button type="submit" class="btn btn-primary" style="width:100%;padding:11px;">Xác Nhận Đặt Lịch Hẹn</button>
+      <button type="submit" id="bk-submit-btn" class="btn btn-primary" style="width:100%;padding:11px;">Xác Nhận Gửi Yêu Cầu Tư Vấn</button>
     </form>
   `);
 
   bindNumericPhoneInputs(modalRoot);
+  const phoneInp = modalRoot.querySelector('#bk-phone-input');
+  const phoneHint = modalRoot.querySelector('#bk-phone-hint');
+  const updatePhoneHint = (showEmptyError = false) => {
+    if (!phoneInp || !phoneHint) return true;
+    const val = phoneInp.value.trim();
+    if (!val && !showEmptyError) {
+      phoneInp.style.borderColor = '';
+      phoneHint.style.color = 'var(--ui-muted)';
+      phoneHint.textContent = 'Bắt buộc nhập đúng 10 chữ số (đầu số VN: 03x, 05x, 07x, 08x, 09x)';
+      return false;
+    }
+    const check = validateVnPhone10(val);
+    if (check.ok) {
+      phoneInp.style.borderColor = 'var(--ui-success)';
+      phoneHint.style.color = 'var(--ui-success)';
+      phoneHint.textContent = `Số điện thoại hợp lệ (10/10 chữ số: ${check.digits})`;
+      return true;
+    }
+    phoneInp.style.borderColor = 'var(--ui-danger, #c62828)';
+    phoneHint.style.color = 'var(--ui-danger, #c62828)';
+    phoneHint.textContent = check.error;
+    return false;
+  };
+  phoneInp?.addEventListener('input', () => updatePhoneHint(false));
+  if (initialPhone) updatePhoneHint(false);
+
   modalRoot.querySelector('#public-booking-form')?.addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
+    const name = fd.get('name').toString().trim();
     const rawPhone = fd.get('phone').toString().trim();
-    if (!isValidPhoneDigits(rawPhone)) {
-      showToast('Số điện thoại bắt buộc chỉ nhập số (9–11 chữ số)', 'error');
+    const dateVal = fd.get('date').toString().trim();
+    if (!name) {
+      showToast('Vui lòng nhập họ tên của bạn trước khi gửi yêu cầu tư vấn.', 'error');
+      modalRoot.querySelector('#bk-name-input')?.focus();
       return;
     }
+    const phoneCheck = validateVnPhone10(rawPhone);
+    if (!phoneCheck.ok) {
+      updatePhoneHint(true);
+      showToast(phoneCheck.error, 'error');
+      phoneInp?.focus();
+      return;
+    }
+    if (!dateVal) {
+      showToast('Vui lòng chọn ngày hẹn tư vấn.', 'error');
+      return;
+    }
+    const submitBtn = modalRoot.querySelector('#bk-submit-btn');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Đang gửi yêu cầu về Trang Quản Lý...'; }
     try {
       await storage.submitBooking({
-        name: fd.get('name').toString().trim(),
-        phone: sanitizePhoneDigits(rawPhone),
+        name,
+        phone: phoneCheck.digits,
         email: u?.email || '',
-        date: fd.get('date').toString(),
+        date: dateVal,
         timeSlot: fd.get('timeSlot').toString(),
         channel: fd.get('channel').toString(),
         service: fd.get('service').toString(),
         note: fd.get('note').toString().trim(),
       });
       closeModal();
-      showToast('Đặt lịch tư vấn thành công! Studio đã ghi nhận và sẽ liên hệ đúng hẹn.', 'success');
+      showToast(`Đã gửi yêu cầu tư vấn thành công! Quản lý sẽ liên hệ số ${phoneCheck.digits} đúng hẹn.`, 'success');
     } catch (err) {
       showToast(err.message || 'Không thể đặt lịch', 'error');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Xác Nhận Gửi Yêu Cầu Tư Vấn'; }
     }
   });
 }
@@ -710,7 +763,7 @@ function openPaymentQrModal({ templateId = '', pkgIdx = 1, settings = {} } = {})
           </div>
           <div class="grid-2">
             <div class="form-group"><label>Họ tên *</label><input class="input" id="qr-cust-name" required value="${escapeHtml(customerName)}" placeholder="VD: Minh Quân" /></div>
-            <div class="form-group"><label>SĐT / Zalo (chỉ nhập số) *</label><input class="input" type="tel" inputmode="numeric" pattern="[0-9]{9,11}" maxlength="11" data-numeric-phone id="qr-cust-phone" required value="${escapeHtml(sanitizePhoneDigits(customerPhone))}" placeholder="09xxxxxxxx" /></div>
+            <div class="form-group"><label>SĐT / Zalo (đủ 10 số) *</label><input class="input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone id="qr-cust-phone" required value="${escapeHtml(sanitizePhoneDigits(customerPhone))}" placeholder="VD: 0912345678" /></div>
           </div>
           <div class="form-group"><label>Ghi chú thêm</label><textarea class="textarea" rows="2" id="qr-cust-note" placeholder="Ngày cưới, màu hợp mệnh..."></textarea></div>
 
@@ -751,7 +804,7 @@ function openPaymentQrModal({ templateId = '', pkgIdx = 1, settings = {} } = {})
     modalRoot.querySelector('#qr-order-form')?.addEventListener('submit', async e => {
       e.preventDefault();
       if (!isValidPhoneDigits(customerPhone)) {
-        showToast('Số điện thoại bắt buộc chỉ nhập số (9–11 chữ số)', 'error');
+        showToast(getPhoneErrorMsg(customerPhone), 'error');
         return;
       }
       const tpl = allTemplates.find(t => t.id === selectedTplId);
@@ -940,18 +993,19 @@ function renderChatWidget(settings = {}, prefillText = '') {
         </div>
 
         ${directRequestOpen ? `
-          <form class="chat-drawer-form chat-direct-form" id="chat-direct-form">
+          <form class="chat-drawer-form chat-direct-form" id="chat-direct-form" novalidate>
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
               <strong style="font-size:12.5px;color:var(--ui-brand);">Nhắn Trực Tiếp Cho Quản Lý</strong>
               <button type="button" class="btn btn-ghost btn-xs" id="btn-cancel-direct">Quay lại</button>
             </div>
             <p style="margin:0;font-size:11.5px;color:var(--ui-muted);line-height:1.45;">
-              Để nhắn trực tiếp cho Quản Lý, vui lòng nhập <strong>Số điện thoại bắt buộc (chỉ nhập số)</strong> để Quản Lý tiếp nhận và hỗ trợ bạn ngay.
+              Để nhắn trực tiếp cho Quản Lý, bắt buộc nhập <strong>Số điện thoại Việt Nam đủ 10 số hợp lệ</strong> để Quản Lý tiếp nhận ngay.
             </p>
             <div class="grid-2" style="gap:6px;">
               <input class="input" name="name" required placeholder="Tên của bạn *" value="${escapeHtml(customerDisplayName)}" />
-              <input class="input" type="tel" inputmode="numeric" pattern="[0-9]{9,11}" maxlength="11" data-numeric-phone name="phone" required placeholder="SĐT bắt buộc (chỉ số) *" value="${escapeHtml(verifiedPhone)}" />
+              <input class="input" id="chat-direct-phone" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone name="phone" required placeholder="SĐT đủ 10 số *" value="${escapeHtml(verifiedPhone)}" />
             </div>
+            <small id="chat-direct-phone-hint" style="display:block;font-size:11px;color:var(--ui-muted);">Bắt buộc đủ 10 số (đầu số VN: 03x, 05x, 07x, 08x, 09x)</small>
             <textarea class="textarea" name="text" rows="2" required placeholder="Nhập nội dung cần Quản Lý tư vấn trực tiếp...">${escapeHtml(chatDirectPrefill)}</textarea>
             <button type="submit" class="btn btn-primary btn-sm" style="width:100%;">Gửi Trực Tiếp Cho Quản Lý</button>
           </form>
@@ -1036,7 +1090,7 @@ function renderChatWidget(settings = {}, prefillText = '') {
       directRequestOpen = true;
       chatDirectPrefill = cleanText;
       renderChatWidget(settings);
-      showToast('Để nhắn trực tiếp cho Quản Lý, bắt buộc nhập Số điện thoại (9–11 chữ số)', 'error');
+      showToast(getPhoneErrorMsg(cleanPhone), 'error');
       return;
     }
 
@@ -1109,6 +1163,23 @@ function renderChatWidget(settings = {}, prefillText = '') {
     await sendLive(fd.get('text').toString());
   });
 
+  const directPhoneInp = chatWidgetRoot.querySelector('#chat-direct-phone');
+  const directPhoneHint = chatWidgetRoot.querySelector('#chat-direct-phone-hint');
+  directPhoneInp?.addEventListener('input', () => {
+    if (!directPhoneHint) return;
+    const v = directPhoneInp.value.trim();
+    if (!v) {
+      directPhoneInp.style.borderColor = '';
+      directPhoneHint.style.color = 'var(--ui-muted)';
+      directPhoneHint.textContent = 'Bắt buộc đủ 10 số (đầu số VN: 03x, 05x, 07x, 08x, 09x)';
+      return;
+    }
+    const ck = validateVnPhone10(v);
+    directPhoneInp.style.borderColor = ck.ok ? 'var(--ui-success)' : 'var(--ui-danger, #c62828)';
+    directPhoneHint.style.color = ck.ok ? 'var(--ui-success)' : 'var(--ui-danger, #c62828)';
+    directPhoneHint.textContent = ck.ok ? `Số điện thoại hợp lệ (10/10 số: ${ck.digits})` : ck.error;
+  });
+
   chatWidgetRoot.querySelector('#chat-direct-form')?.addEventListener('submit', async e => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -1116,8 +1187,15 @@ function renderChatWidget(settings = {}, prefillText = '') {
     const dPhone = (fd.get('phone') || '').toString().trim();
     const dText = (fd.get('text') || '').toString().trim();
     if (!dName) { showToast('Vui lòng nhập tên của bạn', 'error'); return; }
-    if (!isValidPhoneDigits(dPhone)) { showToast('Số điện thoại bắt buộc chỉ nhập số (9–11 chữ số)', 'error'); return; }
-    await sendLive(dText, { name: dName, phone: sanitizePhoneDigits(dPhone), mode: 'direct' });
+    const ck = validateVnPhone10(dPhone);
+    if (!ck.ok) {
+      if (directPhoneHint) { directPhoneHint.style.color = 'var(--ui-danger, #c62828)'; directPhoneHint.textContent = ck.error; }
+      if (directPhoneInp) { directPhoneInp.style.borderColor = 'var(--ui-danger, #c62828)'; directPhoneInp.focus(); }
+      showToast(ck.error, 'error');
+      return;
+    }
+    if (!dText) { showToast('Vui lòng nhập nội dung cần tư vấn', 'error'); return; }
+    await sendLive(dText, { name: dName, phone: ck.digits, mode: 'direct' });
   });
 
   chatWidgetRoot.querySelector('#chat-open-booking')?.addEventListener('click', () => openBookingModal(settings));
@@ -2022,7 +2100,7 @@ async function renderCheckoutPage(invId, token) {
                 <h3 style="margin:0 0 12px;font-size:15.5px;">2. Thông Tin Nhận Sản Phẩm</h3>
                 <div class="grid-2">
                   <div class="form-group" style="margin:0;"><label>Họ và tên *</label><input class="input" id="co-page-name" required value="${escapeHtml(custName)}" placeholder="VD: Minh Quân" /></div>
-                  <div class="form-group" style="margin:0;"><label>Số điện thoại / Zalo (chỉ nhập số) *</label><input class="input" type="tel" inputmode="numeric" pattern="[0-9]{9,11}" maxlength="11" data-numeric-phone id="co-page-phone" required value="${escapeHtml(sanitizePhoneDigits(custPhone))}" placeholder="09xxxxxxxx" /></div>
+                  <div class="form-group" style="margin:0;"><label>Số điện thoại / Zalo (đủ 10 số) *</label><input class="input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone id="co-page-phone" required value="${escapeHtml(sanitizePhoneDigits(custPhone))}" placeholder="VD: 0912345678" /></div>
                 </div>
                 <div class="form-group" style="margin:10px 0 0;"><label>Ghi chú thêm (tùy chọn)</label><input class="input" id="co-page-note" value="${escapeHtml(custNote)}" placeholder="VD: Đã chuyển khoản MB Bank..." /></div>
               </div>
@@ -2080,8 +2158,12 @@ async function renderCheckoutPage(invId, token) {
     });
 
     appRoot.querySelector('#btn-confirm-transfer-deliver')?.addEventListener('click', async e => {
-      if (!custName.trim() || !isValidPhoneDigits(custPhone)) {
-        showToast('Vui lòng nhập Họ tên và Số điện thoại hợp lệ (chỉ nhập 9–11 chữ số)', 'error');
+      if (!custName.trim()) {
+        showToast('Vui lòng nhập Họ và tên để nhận sản phẩm', 'error');
+        return;
+      }
+      if (!isValidPhoneDigits(custPhone)) {
+        showToast(getPhoneErrorMsg(custPhone), 'error');
         return;
       }
       const btn = e.currentTarget;

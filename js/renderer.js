@@ -12,7 +12,7 @@ import {
   getOrnamentCornerSvg,
   getOrnamentDividerSvg,
   getCrestBadgeSvg,
-} from './data.js?v=12';
+} from './data.js?v=13';
 import {
   getBotanicalSpraySvg,
   getCoverFiligreeFrameSvg,
@@ -20,9 +20,9 @@ import {
   getWaxSealSvg,
   getFleuronDividerSvg,
   resolveBackdropUrl,
-} from './artwork.js?v=12';
-import { icon } from './icons.js?v=12';
-import { musicEngine, ParticleCanvasController } from './audio-fx.js?v=12';
+} from './artwork.js?v=13';
+import { icon } from './icons.js?v=13';
+import { musicEngine, ParticleCanvasController } from './audio-fx.js?v=13';
 
 export function escapeHtml(str) {
   return String(str ?? '')

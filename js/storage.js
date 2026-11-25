@@ -4,19 +4,50 @@
  * Tự động fallback mượt mà sang localStorage nếu mở tĩnh không có PHP.
  */
 
-import { createInitialSeedDb, TEMPLATES, DEFAULT_PACKAGES_V9, buildTrialConfig } from './data.js?v=12';
-import { runLocalChatbot, DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=12';
+import { createInitialSeedDb, TEMPLATES, DEFAULT_PACKAGES_V9, buildTrialConfig } from './data.js?v=13';
+import { runLocalChatbot, DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=13';
 
 const LOCAL_KEY = 'lamour_wedding_studio_db_v5';
 const AUTH_TOKEN_KEY = 'lamour_auth_token_v5';
 const AUTH_USER_KEY = 'lamour_auth_user_v5';
 const CHAT_THREAD_KEY = 'lamour_chat_thread_id_v5';
+const CLOUD_API_ORIGIN_KEY = 'lamour_cloud_api_origin_v13';
+const DEFAULT_CLOUD_API_ORIGIN = 'https://frabjous-stardust-68eadc.netlify.app';
 const ADMIN_PASS_HASH = 'd54ddb187125b418d32c2e86b7706ffe729d53d6ef56222411145e583e7f75bd';
 
 export function isStrictGmail(email) {
   const e = String(email || '').trim().toLowerCase();
   if (!e || e.includes('..')) return false;
   return /^[a-z0-9](?:[a-z0-9._+-]{1,62}[a-z0-9])?@gmail\.com$/i.test(e);
+}
+
+export function sanitizeVnPhone10(val) {
+  return String(val || '').replace(/\D/g, '').slice(0, 10);
+}
+
+export function validateVnPhone10(val) {
+  const raw = String(val || '').trim();
+  if (!raw) {
+    return { ok: false, digits: '', error: 'Vui lòng nhập số điện thoại (bắt buộc đủ 10 chữ số).' };
+  }
+  if (/[^0-9\s]/.test(raw)) {
+    return { ok: false, digits: sanitizeVnPhone10(raw), error: 'Số điện thoại chỉ được nhập chữ số (0–9), không nhập chữ hoặc ký tự đặc biệt.' };
+  }
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length !== 10) {
+    return { ok: false, digits, error: `Số điện thoại phải đủ đúng 10 chữ số (hiện tại mới có ${digits.length}/10 số).` };
+  }
+  if (!/^0(?:3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])\d{7}$/.test(digits)) {
+    return { ok: false, digits, error: 'Đầu số điện thoại Việt Nam không hợp lệ (hợp lệ: 03x, 05x, 07x, 08x, 09x đủ 10 số).' };
+  }
+  if (/^0\d(\d)\1{7}$/.test(digits) || /(\d)\1{7}$/.test(digits)) {
+    return { ok: false, digits, error: 'Số điện thoại không hợp lệ (số lặp giả). Vui lòng nhập số điện thoại thật.' };
+  }
+  return { ok: true, digits, error: '' };
+}
+
+export function isValidVnPhone10(val) {
+  return validateVnPhone10(val).ok;
 }
 
 function sha256Fallback(ascii) {
@@ -84,6 +115,7 @@ class StorageService {
   constructor() {
     this.backendMode = 'checking'; // 'netlify' | 'php' | 'local'
     this.apiBase = '';
+    this.apiOrigin = '';
     this.oauthInfo = {};
     this.aiAgentReady = false;
     this.authToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
@@ -94,12 +126,34 @@ class StorageService {
     }
   }
 
+  getConfiguredCloudOrigin() {
+    try {
+      const qsApi = new URLSearchParams(window.location.search).get('api');
+      if (qsApi && /^https?:\/\//i.test(qsApi)) {
+        const clean = qsApi.replace(/\/+$/, '').replace(/\/api$/i, '');
+        localStorage.setItem(CLOUD_API_ORIGIN_KEY, clean);
+        return clean;
+      }
+      const saved = (localStorage.getItem(CLOUD_API_ORIGIN_KEY) || '').trim();
+      if (saved && /^https?:\/\//i.test(saved)) return saved.replace(/\/+$/, '').replace(/\/api$/i, '');
+    } catch (_) {}
+    return DEFAULT_CLOUD_API_ORIGIN;
+  }
+
   isCloudOnline() {
     return this.backendMode === 'netlify' || this.backendMode === 'php';
   }
 
   apiUrl(qs) {
     return `${this.apiBase || '/api'}?${qs}`;
+  }
+
+  resolveMediaUrl(url) {
+    if (!url) return url;
+    if (this.apiOrigin && typeof url === 'string' && url.startsWith('/api?')) {
+      return `${this.apiOrigin}${url}`;
+    }
+    return url;
   }
 
   setSession(token, user) {
@@ -130,39 +184,69 @@ class StorageService {
     return h;
   }
 
-  async detectBackend() {
-    const isFile = window.location.protocol === 'file:';
-    const isGithubPages = window.location.hostname.endsWith('.github.io');
-    if (isFile || isGithubPages) {
-      this.backendMode = 'local';
-      this.apiBase = '';
-      this.ensureLocalSeed();
-      return 'local';
-    }
-
-    // 1. Try Netlify Functions Cloud Backend (/api) first — enables real cross-device Live Chat on Netlify!
+  async tryConnectNetlifyApi(baseEndpoint, originPrefix = '') {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
     try {
-      const res = await fetch('/api?action=ping', { cache: 'no-store' });
+      const res = await fetch(`${baseEndpoint}?action=ping`, {
+        cache: 'no-store',
+        ...(controller ? { signal: controller.signal } : {}),
+      });
       const ct = (res.headers.get('content-type') || '').toLowerCase();
       if (res.ok && ct.includes('application/json')) {
         const data = await res.json();
         if (data && data.ok) {
           this.backendMode = 'netlify';
-          this.apiBase = '/api';
+          this.apiBase = baseEndpoint;
+          this.apiOrigin = originPrefix;
           this.oauthInfo = data.oauth || {};
           this.aiAgentReady = Boolean(data.aiAgentReady);
           if (!data.hasDb) {
-            await fetch('/api?action=init', {
+            await fetch(`${baseEndpoint}?action=init`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify(createInitialSeedDb()),
             });
           }
           if (this.authToken) await this.verifySession();
-          return 'netlify';
+          return true;
         }
       }
-    } catch (_) {}
+    } catch (_) {} finally {
+      if (timer) clearTimeout(timer);
+    }
+    return false;
+  }
+
+  async detectBackend() {
+    const isFile = window.location.protocol === 'file:';
+    const isGithubPages = window.location.hostname.endsWith('.github.io');
+    if (isFile) {
+      this.backendMode = 'local';
+      this.apiBase = '';
+      this.apiOrigin = '';
+      this.ensureLocalSeed();
+      return 'local';
+    }
+
+    const cloudOrigin = this.getConfiguredCloudOrigin();
+
+    // On GitHub Pages (*.github.io), connect directly over HTTPS CORS to our Netlify Cloud Backend (/api)!
+    if (isGithubPages) {
+      if (cloudOrigin && await this.tryConnectNetlifyApi(`${cloudOrigin}/api`, cloudOrigin)) {
+        return 'netlify';
+      }
+      this.backendMode = 'local';
+      this.apiBase = '';
+      this.apiOrigin = '';
+      this.ensureLocalSeed();
+      return 'local';
+    }
+
+    // 1. Try same-origin Netlify Functions Cloud Backend (/api) first
+    if (await this.tryConnectNetlifyApi('/api', '')) {
+      return 'netlify';
+    }
 
     // 2. Try PHP Hosting / XAMPP Backend (api.php)
     if (!window.location.hostname.endsWith('.netlify.app')) {
@@ -174,6 +258,7 @@ class StorageService {
           if (data && data.ok) {
             this.backendMode = 'php';
             this.apiBase = 'api.php';
+            this.apiOrigin = '';
             this.oauthInfo = data.oauth || {};
             if (!data.hasDb) {
               await fetch('api.php?action=init', {
@@ -187,10 +272,18 @@ class StorageService {
           }
         }
       } catch (_) {}
+
+      // 3. Fallback to configured Cloud API origin for other static hosts
+      if (cloudOrigin && cloudOrigin !== window.location.origin) {
+        if (await this.tryConnectNetlifyApi(`${cloudOrigin}/api`, cloudOrigin)) {
+          return 'netlify';
+        }
+      }
     }
 
     this.backendMode = 'local';
     this.apiBase = '';
+    this.apiOrigin = '';
     this.ensureLocalSeed();
     return 'local';
   }
@@ -364,9 +457,9 @@ class StorageService {
     const db = this.readLocalDb();
     db.users = db.users || [];
     if (loginMethod === 'phone') {
-      const digitsOnly = identifier.replace(/\D/g, '');
-      if (/[^0-9\s]/.test(identifier) || digitsOnly.length < 9 || digitsOnly.length > 11) {
-        throw new Error('Đăng nhập bằng số điện thoại bắt buộc chỉ nhập số (9–11 chữ số)');
+      const ck = validateVnPhone10(identifier);
+      if (!ck.ok) {
+        throw new Error(ck.error);
       }
     } else if (loginMethod === 'gmail') {
       if (!isStrictGmail(identifier)) {
@@ -423,14 +516,15 @@ class StorageService {
         throw new Error('Gmail nhập lại chưa khớp với Gmail bạn đã tạo');
       }
     }
-    if (provider === 'phone' && (!rawPhone || /[^0-9\s]/.test(rawPhone) || cleanPhone.length < 9 || cleanPhone.length > 11)) {
-      throw new Error('Số điện thoại bắt buộc chỉ nhập số (9–11 chữ số)');
-    }
-    if (provider === 'phone' && normEmail && !isStrictGmail(normEmail)) {
-      throw new Error('Gmail bổ sung phải đúng định dạng @gmail.com');
-    }
-    if (rawPhone && (/[^0-9\s]/.test(rawPhone) || cleanPhone.length < 9 || cleanPhone.length > 11)) {
-      throw new Error('Số điện thoại chỉ được nhập chữ số (9–11 số)');
+    if (provider === 'phone') {
+      const ck = validateVnPhone10(rawPhone);
+      if (!ck.ok) throw new Error(ck.error);
+      if (normEmail && !isStrictGmail(normEmail)) {
+        throw new Error('Gmail bổ sung phải đúng định dạng @gmail.com');
+      }
+    } else if (rawPhone) {
+      const ck = validateVnPhone10(rawPhone);
+      if (!ck.ok) throw new Error(ck.error);
     }
     if (normEmail && db.users.some(u => (u.email || '').toLowerCase() === normEmail)) throw new Error('Gmail này đã được đăng ký, vui lòng đăng nhập');
     if (cleanPhone && db.users.some(u => (u.phone || '').replace(/\D/g, '') === cleanPhone)) throw new Error('SĐT này đã được đăng ký');
@@ -522,11 +616,14 @@ class StorageService {
 
   /* ===================== BOOKING & QR ORDER ===================== */
   async submitBooking(payload) {
+    const phoneCheck = validateVnPhone10(payload?.phone);
+    if (!phoneCheck.ok) throw new Error(phoneCheck.error);
+    const cleanPayload = { ...payload, phone: phoneCheck.digits };
     if (this.isCloudOnline()) {
       const res = await fetch(this.apiUrl('action=booking_submit'), {
         method: 'POST',
         headers: this.authHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(payload),
+        body: JSON.stringify(cleanPayload),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Đặt lịch thất bại');
@@ -534,19 +631,22 @@ class StorageService {
     }
     const db = this.readLocalDb();
     db.bookings = db.bookings || [];
-    const booking = { id: 'bk_' + Date.now(), userId: this.currentUser?.id || '', ...payload, status: 'pending', createdAt: new Date().toISOString() };
+    const booking = { id: 'bk_' + Date.now(), userId: this.currentUser?.id || '', ...cleanPayload, status: 'pending', createdAt: new Date().toISOString() };
     db.bookings.unshift(booking);
     this.writeLocalDb(db);
     return { ok: true, booking };
   }
 
   async submitConsultation(payload, { clientToken = '' } = {}) {
+    const phoneCheck = validateVnPhone10(payload?.phone);
+    if (!phoneCheck.ok) throw new Error(phoneCheck.error);
+    const cleanPayload = { ...payload, phone: phoneCheck.digits };
     if (this.isCloudOnline()) {
       const headers = this.authHeaders({ 'Content-Type': 'application/json', ...(clientToken ? { 'X-Client-Token': clientToken } : {}) });
       const res = await fetch(this.apiUrl('action=consultation_submit'), {
         method: 'POST',
         headers,
-        body: JSON.stringify(payload),
+        body: JSON.stringify(cleanPayload),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không gửi được yêu cầu');
@@ -554,7 +654,7 @@ class StorageService {
     }
     const db = this.readLocalDb();
     db.consultations = db.consultations || [];
-    const entry = { id: 'cs_' + Date.now(), userId: this.currentUser?.id || '', email: this.currentUser?.email || '', ...payload, status: 'new', createdAt: new Date().toISOString() };
+    const entry = { id: 'cs_' + Date.now(), userId: this.currentUser?.id || '', email: this.currentUser?.email || '', ...cleanPayload, status: 'new', createdAt: new Date().toISOString() };
     db.consultations.unshift(entry);
     if (payload.invitationId) {
       const inv = (db.invitations || []).find(i => i.id === payload.invitationId);
@@ -739,8 +839,9 @@ class StorageService {
     const effectivePhone = cleanPhone || existingPhone;
 
     if (mode === 'direct') {
-      if (!effectivePhone || /[^0-9\s]/.test(rawPhone) || effectivePhone.length < 9 || effectivePhone.length > 11) {
-        throw new Error('Để nhắn trực tiếp cho Quản Lý, bắt buộc nhập Số điện thoại hợp lệ (9–11 chữ số)');
+      const ck = validateVnPhone10(rawPhone || effectivePhone);
+      if (!ck.ok) {
+        throw new Error(`Để nhắn trực tiếp cho Quản Lý: ${ck.error}`);
       }
     }
 
@@ -1020,7 +1121,7 @@ class StorageService {
       const res = await fetch(this.apiUrl(`action=upload&id=${encodeURIComponent(invId)}`), { method: 'POST', headers, body: form });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Tải file thất bại');
-      return data.url;
+      return this.resolveMediaUrl(data.url);
     }
     return await this.fileToDataUrl(processed);
   }

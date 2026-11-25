@@ -14,13 +14,13 @@ import {
   TEMPLATES,
   VIET_BANKS,
   createInvitationFromTemplate,
-} from './data.js?v=12';
-import { COVER_BACKDROPS } from './artwork.js?v=12';
-import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=12';
-import { storage } from './storage.js?v=12';
-import { escapeHtml } from './renderer.js?v=12';
-import { buildAbsoluteUrl } from './studio.js?v=12';
-import { icon } from './icons.js?v=12';
+} from './data.js?v=13';
+import { COVER_BACKDROPS } from './artwork.js?v=13';
+import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=13';
+import { storage, sanitizeVnPhone10, validateVnPhone10 } from './storage.js?v=13';
+import { escapeHtml } from './renderer.js?v=13';
+import { buildAbsoluteUrl } from './studio.js?v=13';
+import { icon } from './icons.js?v=13';
 
 function formatVnd(n) {
   return Number(n || 0).toLocaleString('vi-VN') + 'đ';
@@ -90,6 +90,7 @@ export class AdminManagementCenter {
   mount() {
     this.ensureCollections();
     this.lastThreadsSignature = JSON.stringify(this.db.chatThreads || []);
+    this.lastBookingsSignature = JSON.stringify(this.db.bookings || []);
     this.stopPolling();
     this.renderShell();
     this.startPolling();
@@ -97,8 +98,11 @@ export class AdminManagementCenter {
 
   updateLiveChatBadges() {
     const threads = this.db.chatThreads || [];
+    const bookings = this.db.bookings || [];
     const unreadChats = threads.reduce((s, t) => s + Number(t.unreadByAdmin || 0), 0);
     const waitingCount = threads.filter(t => t.waitingForAdmin).length;
+    const pendingBookings = bookings.filter(b => b.status === 'pending').length;
+
     const badgeEl = this.root.querySelector('[data-side-chat-badge]');
     if (badgeEl) {
       badgeEl.textContent = unreadChats > 0 ? String(unreadChats) : '';
@@ -110,50 +114,81 @@ export class AdminManagementCenter {
         ? `${waitingCount} chờ trực tiếp / ${threads.length} khách`
         : `${unreadChats} chưa đọc / ${threads.length} khách`;
     }
+    const bkBadgeEl = this.root.querySelector('[data-side-booking-badge]');
+    if (bkBadgeEl) {
+      bkBadgeEl.textContent = pendingBookings > 0 ? String(pendingBookings) : '';
+      bkBadgeEl.style.display = pendingBookings > 0 ? 'inline-block' : 'none';
+    }
+    const bkStatEl = this.root.querySelector('[data-stat-booking]');
+    if (bkStatEl) {
+      bkStatEl.textContent = `${pendingBookings} chờ / ${bookings.length} tổng`;
+    }
   }
 
   async syncLiveChat(notifyOnNew = true) {
     try {
       const fresh = await storage.getAdminDb();
       const nextThreads = fresh.chatThreads || [];
-      const nextSig = JSON.stringify(nextThreads);
-      if (nextSig === this.lastThreadsSignature) return;
+      const nextBookings = fresh.bookings || [];
+      const nextThreadsSig = JSON.stringify(nextThreads);
+      const nextBookingsSig = JSON.stringify(nextBookings);
 
-      const prevUnread = (this.db.chatThreads || []).reduce((s, t) => s + Number(t.unreadByAdmin || 0), 0);
-      const nextUnread = nextThreads.reduce((s, t) => s + Number(t.unreadByAdmin || 0), 0);
-      const nextWaiting = nextThreads.filter(t => t.waitingForAdmin);
+      const threadsChanged = nextThreadsSig !== this.lastThreadsSignature;
+      const bookingsChanged = nextBookingsSig !== this.lastBookingsSignature;
+      if (!threadsChanged && !bookingsChanged) return;
 
-      this.db.chatThreads = nextThreads;
-      this.lastThreadsSignature = nextSig;
-      this.updateLiveChatBadges();
-
-      if (notifyOnNew && nextUnread > prevUnread) {
-        if (nextWaiting.length > 0) {
-          this.showToast(`Khách ${nextWaiting[0].customerName || ''} (${nextWaiting[0].customerPhone || ''}) đang CHỜ nhắn trực tiếp!`, 'info');
-        } else {
-          this.showToast('Có tin nhắn mới từ khách hàng trong Khung Chat Trực Tiếp', 'info');
+      if (bookingsChanged) {
+        const prevBookingIds = new Set((this.db.bookings || []).map(b => b.id));
+        const newlyAdded = nextBookings.filter(b => !prevBookingIds.has(b.id));
+        this.db.bookings = nextBookings;
+        if (Array.isArray(fresh.consultations)) this.db.consultations = fresh.consultations;
+        this.lastBookingsSignature = nextBookingsSig;
+        if (notifyOnNew && newlyAdded.length > 0) {
+          this.showToast(`Yêu cầu tư vấn mới từ ${newlyAdded[0].name || 'Khách'} (${newlyAdded[0].phone || ''})!`, 'info');
+        }
+        if (this.activeTab === 'bookings') {
+          this.renderBookingsModule();
         }
       }
 
-      if (this.activeTab === 'livechat') {
-        const inp = this.root.querySelector('#admin-reply-input');
-        const draft = inp ? inp.value : '';
-        const wasFocused = inp && document.activeElement === inp;
-        if (!draft && nextWaiting.length > 0 && !nextThreads.find(t => t.id === this.selectedThreadId)?.waitingForAdmin) {
-          this.selectedThreadId = nextWaiting[0].id;
+      if (threadsChanged) {
+        const prevUnread = (this.db.chatThreads || []).reduce((s, t) => s + Number(t.unreadByAdmin || 0), 0);
+        const nextUnread = nextThreads.reduce((s, t) => s + Number(t.unreadByAdmin || 0), 0);
+        const nextWaiting = nextThreads.filter(t => t.waitingForAdmin);
+
+        this.db.chatThreads = nextThreads;
+        this.lastThreadsSignature = nextThreadsSig;
+
+        if (notifyOnNew && nextUnread > prevUnread) {
+          if (nextWaiting.length > 0) {
+            this.showToast(`Khách ${nextWaiting[0].customerName || ''} (${nextWaiting[0].customerPhone || ''}) đang CHỜ nhắn trực tiếp!`, 'info');
+          } else {
+            this.showToast('Có tin nhắn mới từ khách hàng trong Khung Chat Trực Tiếp', 'info');
+          }
         }
-        this.renderLiveChatContent();
-        if (draft || wasFocused) {
-          const nextInp = this.root.querySelector('#admin-reply-input');
-          if (nextInp) {
-            nextInp.value = draft;
-            if (wasFocused) {
-              nextInp.focus();
-              nextInp.setSelectionRange(draft.length, draft.length);
+
+        if (this.activeTab === 'livechat') {
+          const inp = this.root.querySelector('#admin-reply-input');
+          const draft = inp ? inp.value : '';
+          const wasFocused = inp && document.activeElement === inp;
+          if (!draft && nextWaiting.length > 0 && !nextThreads.find(t => t.id === this.selectedThreadId)?.waitingForAdmin) {
+            this.selectedThreadId = nextWaiting[0].id;
+          }
+          this.renderLiveChatContent();
+          if (draft || wasFocused) {
+            const nextInp = this.root.querySelector('#admin-reply-input');
+            if (nextInp) {
+              nextInp.value = draft;
+              if (wasFocused) {
+                nextInp.focus();
+                nextInp.setSelectionRange(draft.length, draft.length);
+              }
             }
           }
         }
       }
+
+      this.updateLiveChatBadges();
     } catch (_) {}
   }
 
@@ -215,7 +250,7 @@ export class AdminManagementCenter {
           </button>
           <button type="button" class="admin-side-btn ${this.activeTab === 'bookings' ? 'active' : ''}" data-side-tab="bookings">
             <span>Quản Lý Đặt Lịch</span>
-            ${pendingBookings > 0 ? `<span class="admin-side-count">${pendingBookings}</span>` : ''}
+            <span class="admin-side-count" data-side-booking-badge style="${pendingBookings > 0 ? '' : 'display:none;'}">${pendingBookings}</span>
           </button>
           <button type="button" class="admin-side-btn ${this.activeTab === 'users' ? 'active' : ''}" data-side-tab="users">
             <span>Tài Khoản Khách Hàng</span>
@@ -255,7 +290,7 @@ export class AdminManagementCenter {
             </div>
             <div class="stat-card">
               <div class="stat-card-head"><span>Lịch hẹn tư vấn</span></div>
-              <strong style="color:var(--ui-warning);">${pendingBookings} chờ / ${bookings.length} tổng</strong>
+              <strong style="color:var(--ui-warning);" data-stat-booking>${pendingBookings} chờ / ${bookings.length} tổng</strong>
             </div>
             <div class="stat-card">
               <div class="stat-card-head"><span>Hội thoại Live Chat</span></div>
@@ -692,10 +727,10 @@ export class AdminManagementCenter {
         <h3>Thêm Lịch Hẹn Tư Vấn Mới</h3>
         <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
       </div>
-      <form id="admin-bk-form">
+      <form id="admin-bk-form" novalidate>
         <div class="grid-2">
           <div class="form-group"><label>Tên khách hàng *</label><input class="input" name="name" required /></div>
-          <div class="form-group"><label>SĐT / Zalo *</label><input class="input" name="phone" required /></div>
+          <div class="form-group"><label>SĐT / Zalo (đủ 10 số) *</label><input class="input" id="admin-bk-phone" type="tel" inputmode="numeric" maxlength="10" name="phone" required placeholder="VD: 0912345678" /></div>
         </div>
         <div class="grid-3">
           <div class="form-group"><label>Ngày hẹn *</label><input class="input" type="date" name="date" required value="${today}" /></div>
@@ -718,14 +753,21 @@ export class AdminManagementCenter {
       </form>
     `);
 
+    const admPhone = document.querySelector('#admin-bk-phone');
+    admPhone?.addEventListener('input', () => { admPhone.value = sanitizeVnPhone10(admPhone.value); });
+
     document.querySelector('#admin-bk-form')?.addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
+      const name = fd.get('name').toString().trim();
+      const phoneCheck = validateVnPhone10(fd.get('phone').toString().trim());
+      if (!name) { this.showToast('Vui lòng nhập tên khách hàng', 'error'); return; }
+      if (!phoneCheck.ok) { this.showToast(phoneCheck.error, 'error'); admPhone?.focus(); return; }
       this.db.bookings.unshift({
         id: 'bk_' + Date.now(),
         userId: '',
-        name: fd.get('name').toString().trim(),
-        phone: fd.get('phone').toString().trim(),
+        name,
+        phone: phoneCheck.digits,
         email: '',
         date: fd.get('date').toString(),
         timeSlot: fd.get('timeSlot').toString(),
