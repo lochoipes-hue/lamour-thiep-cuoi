@@ -14,13 +14,13 @@ import {
   TEMPLATES,
   VIET_BANKS,
   createInvitationFromTemplate,
-} from './data.js?v=13';
-import { COVER_BACKDROPS } from './artwork.js?v=13';
-import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=13';
-import { storage, sanitizeVnPhone10, validateVnPhone10 } from './storage.js?v=13';
-import { escapeHtml } from './renderer.js?v=13';
-import { buildAbsoluteUrl } from './studio.js?v=13';
-import { icon } from './icons.js?v=13';
+} from './data.js?v=14';
+import { COVER_BACKDROPS } from './artwork.js?v=14';
+import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
+import { storage, sanitizeVnPhone10, validateVnPhone10 } from './storage.js?v=14';
+import { escapeHtml } from './renderer.js?v=14';
+import { buildAbsoluteUrl } from './studio.js?v=14';
+import { icon } from './icons.js?v=14';
 
 function formatVnd(n) {
   return Number(n || 0).toLocaleString('vi-VN') + 'đ';
@@ -1360,6 +1360,29 @@ export class AdminManagementCenter {
             <div class="form-group"><label>Tên chủ TK (IN HOA KHÔNG DẤU)</label><input class="input" name="paymentAccountName" value="${escapeHtml(s.paymentAccountName || '')}" placeholder="VD: NGUYEN VAN A" /></div>
           </div>
 
+          <div style="border:1px solid #d5e6da;background:#f7fcf8;border-radius:12px;padding:14px;margin:10px 0 18px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <h4 style="margin:0;font-size:14px;color:var(--ui-text);">Tự Động Xác Nhận Tiền Vào &amp; Bàn Giao Thiệp (Webhook Ngân Hàng)</h4>
+              <span class="badge ${(s.paymentWebhookSecret || storage.paymentWebhookActive) ? 'badge-paid' : 'badge-trial'}">
+                ${(s.paymentWebhookSecret || storage.paymentWebhookActive) ? 'Đang bật xác minh ngân hàng tự động' : 'Chưa gắn Webhook (chế độ chuyển khoản trực tiếp)'}
+              </span>
+            </div>
+            <p style="font-size:12px;color:var(--ui-muted);margin:0 0 10px;line-height:1.55;">
+              Để khách quét mã QR chuyển khoản vào <strong>MB Bank ${escapeHtml(s.paymentAccountNo || '0354248177')}</strong> và hệ thống <strong>tự động nhận thông báo đã vào tiền → tự chuyển sang trang bàn giao thiệp sau 3 giây (không cần Quản lý duyệt)</strong>, hãy liên kết tài khoản MB Bank với <strong>SePay.vn</strong> (miễn phí) hoặc <strong>Casso.vn</strong> / <strong>PayOS</strong> rồi dán Webhook URL &amp; API Key bên dưới:
+            </p>
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11.5px;font-weight:700;color:var(--ui-brand);margin-bottom:4px;">Webhook URL (dán vào SePay → Tích hợp Webhook → URL nhận thông báo):</div>
+              <div class="link-box">
+                <code id="webhook-url-code">${escapeHtml(storage.paymentWebhookUrl || 'https://frabjous-stardust-68eadc.netlify.app/api?action=payment_webhook')}</code>
+                <button type="button" class="btn btn-outline btn-xs" id="btn-copy-webhook-url">Sao chép URL</button>
+              </div>
+            </div>
+            <div class="form-group" style="margin:0;">
+              <label>Webhook API Key / Secret (SePay Apikey hoặc Casso Secure-Token — bảo mật, không hiển thị ra khách)</label>
+              <input class="input" type="password" name="paymentWebhookSecret" value="${escapeHtml(s.paymentWebhookSecret || '')}" placeholder="Dán API Key tạo trên SePay/Casso (để trống nếu chưa gắn)..." autocomplete="new-password" />
+            </div>
+          </div>
+
           <h4 style="margin:18px 0 12px;font-size:14px;">Bảng Giá 4 Gói Dịch Vụ</h4>
           <div class="grid-2">
             ${(s.packages || []).map((p, i) => `
@@ -1395,6 +1418,11 @@ export class AdminManagementCenter {
       </div>
     `;
 
+    host.querySelector('#btn-copy-webhook-url')?.addEventListener('click', () => {
+      const url = host.querySelector('#webhook-url-code')?.textContent?.trim() || '';
+      if (url) navigator.clipboard?.writeText(url).then(() => this.showToast('Đã sao chép Webhook URL nhận thông báo ngân hàng!', 'success'));
+    });
+
     host.querySelector('#admin-settings-form')?.addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
@@ -1408,6 +1436,7 @@ export class AdminManagementCenter {
       this.db.settings.paymentBankName = (VIET_BANKS.find(b => b.code === bankCode)?.name) || bankCode;
       this.db.settings.paymentAccountNo = fd.get('paymentAccountNo').toString().trim();
       this.db.settings.paymentAccountName = fd.get('paymentAccountName').toString().trim().toUpperCase();
+      this.db.settings.paymentWebhookSecret = (fd.get('paymentWebhookSecret') || '').toString().trim();
       this.db.settings.facebookAppId = (fd.get('facebookAppId') || '').toString().trim();
       this.db.settings.googleClientId = (fd.get('googleClientId') || '').toString().trim();
       host.querySelectorAll('[data-pkg]').forEach(el => { const [i, f] = el.dataset.pkg.split(':'); this.db.settings.packages[Number(i)][f] = el.value; });

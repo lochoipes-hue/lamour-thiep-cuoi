@@ -22,12 +22,12 @@ import {
   getTrialState,
   analyzeCoupleFengShui,
   generateHarmonyMix,
-} from './data.js?v=13';
-import { COVER_BACKDROPS, resolveBackdropUrl } from './artwork.js?v=13';
-import { InvitationRenderer, escapeHtml } from './renderer.js?v=13';
-import { musicEngine } from './audio-fx.js?v=13';
-import { storage } from './storage.js?v=13';
-import { icon } from './icons.js?v=13';
+} from './data.js?v=14';
+import { COVER_BACKDROPS, resolveBackdropUrl } from './artwork.js?v=14';
+import { InvitationRenderer, escapeHtml } from './renderer.js?v=14';
+import { musicEngine } from './audio-fx.js?v=14';
+import { storage } from './storage.js?v=14';
+import { icon } from './icons.js?v=14';
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));

@@ -3,8 +3,8 @@
  * Hoa Văn SVG & Bộ Dữ Liệu Gợi Ý (Chuẩn Thẩm Mỹ Chuyên Nghiệp — Không Emoji)
  */
 
-import { EDITORIAL_SAMPLE_PHOTOS } from './artwork.js?v=13';
-import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=13';
+import { EDITORIAL_SAMPLE_PHOTOS } from './artwork.js?v=14';
+import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
 
 export const FONT_OPTIONS = [
   { id: 'Cormorant Garamond', label: 'Cormorant Garamond (Biên tập hoàng gia)', stack: "'Cormorant Garamond', Georgia, serif", kind: 'heading' },

@@ -4,8 +4,8 @@
  * Tự động fallback mượt mà sang localStorage nếu mở tĩnh không có PHP.
  */
 
-import { createInitialSeedDb, TEMPLATES, DEFAULT_PACKAGES_V9, buildTrialConfig } from './data.js?v=13';
-import { runLocalChatbot, DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=13';
+import { createInitialSeedDb, TEMPLATES, DEFAULT_PACKAGES_V9, buildTrialConfig, createInvitationFromTemplate } from './data.js?v=14';
+import { runLocalChatbot, DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
 
 const LOCAL_KEY = 'lamour_wedding_studio_db_v5';
 const AUTH_TOKEN_KEY = 'lamour_auth_token_v5';
@@ -118,6 +118,8 @@ class StorageService {
     this.apiOrigin = '';
     this.oauthInfo = {};
     this.aiAgentReady = false;
+    this.paymentWebhookActive = false;
+    this.paymentWebhookUrl = '';
     this.authToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
     try {
       this.currentUser = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || 'null');
@@ -201,6 +203,8 @@ class StorageService {
           this.apiOrigin = originPrefix;
           this.oauthInfo = data.oauth || {};
           this.aiAgentReady = Boolean(data.aiAgentReady);
+          this.paymentWebhookActive = Boolean(data.paymentWebhookActive);
+          this.paymentWebhookUrl = data.paymentWebhookUrl || `${originPrefix || window.location.origin}/api?action=payment_webhook`;
           if (!data.hasDb) {
             await fetch(`${baseEndpoint}?action=init`, {
               method: 'POST',
@@ -744,6 +748,141 @@ class StorageService {
     db.invitations[idx] = inv;
     this.writeLocalDb(db);
     return { ok: true, invitation: inv, order: orderEntry };
+  }
+
+  async createPaymentOrder(payload, { clientToken = '' } = {}) {
+    const phoneCheck = validateVnPhone10(payload?.phone);
+    if (!phoneCheck.ok) throw new Error(phoneCheck.error);
+    const cleanPayload = { ...payload, phone: phoneCheck.digits };
+
+    if (this.isCloudOnline()) {
+      const headers = this.authHeaders({ 'Content-Type': 'application/json', ...(clientToken ? { 'X-Client-Token': clientToken } : {}) });
+      const res = await fetch(this.apiUrl('action=payment_create'), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(cleanPayload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không tạo được mã QR thanh toán');
+      this.paymentWebhookActive = Boolean(data.webhookActive);
+      return data;
+    }
+
+    // Local fallback when Cloud Backend is not yet reachable
+    const db = this.readLocalDb();
+    db.invitations = db.invitations || [];
+    db.paymentOrders = db.paymentOrders || {};
+    const pkgs = db.settings?.packages || DEFAULT_PACKAGES_V9;
+    const matchedPkg = pkgs.find(p => p.id === cleanPayload.packageId || p.name === cleanPayload.packageName) || pkgs[1] || pkgs[0];
+    const amount = Number(matchedPkg?.price || cleanPayload.amount || 189000);
+
+    let inv = null;
+    if (cleanPayload.invitationId) {
+      inv = db.invitations.find(i => i.id === cleanPayload.invitationId) || null;
+    }
+    if (!inv) {
+      const tplObj = (db.templates || TEMPLATES).find(t => t.id === cleanPayload.templateId) || (db.templates || TEMPLATES)[0];
+      inv = createInvitationFromTemplate(tplObj, {
+        customerName: cleanPayload.name,
+        customerPhone: cleanPayload.phone,
+        customerEmail: cleanPayload.email || this.currentUser?.email || '',
+        packageName: matchedPkg?.name || 'Gói Tiêu Chuẩn',
+        price: amount,
+      });
+      inv.order.userId = this.currentUser?.id || '';
+      inv.order.status = 'pending_payment';
+      db.invitations.unshift(inv);
+    }
+
+    const nowMs = Date.now();
+    const code = 'LAMOUR' + Math.random().toString(36).replace(/[^a-z0-9]/g, '').toUpperCase().slice(0, 6).padEnd(6, '8');
+    const payment = {
+      code,
+      invitationId: inv.id,
+      clientToken: inv.clientToken,
+      userId: this.currentUser?.id || inv.order?.userId || '',
+      name: cleanPayload.name,
+      phone: cleanPayload.phone,
+      email: cleanPayload.email || this.currentUser?.email || '',
+      templateId: inv.templateId || '',
+      templateName: inv.templateName || inv.title || '',
+      packageId: matchedPkg?.id || '',
+      packageName: matchedPkg?.name || 'Gói Tiêu Chuẩn',
+      amount,
+      note: cleanPayload.note || '',
+      bankCode: db.settings?.paymentBankCode || 'MB',
+      bankName: db.settings?.paymentBankName || 'MB Bank — Ngân hàng Quân Đội',
+      accountNo: String(db.settings?.paymentAccountNo || '0354248177').replace(/\s+/g, ''),
+      accountName: String(db.settings?.paymentAccountName || '').trim(),
+      status: inv.order?.status === 'paid' ? 'paid' : 'pending',
+      createdAt: new Date(nowMs).toISOString(),
+      expiresAt: new Date(nowMs + 15 * 60 * 1000).toISOString(),
+      paidAt: inv.order?.paidAt || '',
+      bankRef: '',
+      gateway: '',
+    };
+    db.paymentOrders[code] = payment;
+    this.writeLocalDb(db);
+    return { ok: true, payment, invitationId: inv.id, clientToken: inv.clientToken, webhookActive: false };
+  }
+
+  async getPaymentStatus(code) {
+    if (this.isCloudOnline()) {
+      const res = await fetch(this.apiUrl(`action=payment_status&code=${encodeURIComponent(code)}`), { cache: 'no-store' });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không kiểm tra được trạng thái thanh toán');
+      this.paymentWebhookActive = Boolean(data.webhookActive);
+      return data;
+    }
+    const db = this.readLocalDb();
+    const payment = (db.paymentOrders || {})[code];
+    if (!payment) throw new Error('Không tìm thấy mã giao dịch này');
+    const inv = (db.invitations || []).find(i => i.id === payment.invitationId) || null;
+    const isPaid = payment.status === 'paid' || inv?.order?.status === 'paid';
+    return {
+      ok: true,
+      status: isPaid ? 'paid' : (Date.now() > Date.parse(payment.expiresAt) ? 'expired' : 'pending'),
+      payment,
+      invitationId: payment.invitationId,
+      clientToken: isPaid ? (inv?.clientToken || payment.clientToken) : '',
+      invitation: isPaid ? inv : null,
+      webhookActive: false,
+    };
+  }
+
+  async confirmPaymentDemo(code, { clientToken = '' } = {}) {
+    if (this.isCloudOnline()) {
+      const headers = this.authHeaders({ 'Content-Type': 'application/json', ...(clientToken ? { 'X-Client-Token': clientToken } : {}) });
+      const res = await fetch(this.apiUrl('action=payment_confirm_demo'), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ code, clientToken }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Chưa nhận được thông báo thanh toán từ ngân hàng');
+      return data;
+    }
+    const db = this.readLocalDb();
+    const payment = (db.paymentOrders || {})[code];
+    if (!payment) throw new Error('Không tìm thấy đơn thanh toán');
+    const res = await this.completeCheckoutAndDeliver(payment.invitationId, {
+      name: payment.name,
+      phone: payment.phone,
+      email: payment.email,
+      packageId: payment.packageId,
+      packageName: payment.packageName,
+      amount: payment.amount,
+      transferCode: payment.code,
+      message: payment.note || 'Khách chuyển khoản trực tiếp VietQR MB Bank',
+    }, { clientToken: clientToken || payment.clientToken });
+    const db2 = this.readLocalDb();
+    if (db2.paymentOrders?.[code]) {
+      db2.paymentOrders[code].status = 'paid';
+      db2.paymentOrders[code].paidAt = new Date().toISOString();
+      db2.paymentOrders[code].gateway = 'Direct-QR-Local';
+      this.writeLocalDb(db2);
+    }
+    return { ok: true, status: 'paid', payment: db2.paymentOrders?.[code] || payment, invitation: res.invitation, clientToken: res.invitation?.clientToken || payment.clientToken };
   }
 
   async customerCreateInvitation(payload) {
