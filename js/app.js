@@ -285,9 +285,10 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
 
   const handleDirectFacebook = async () => {
     const oa = getOAuth();
+    const returnTo = encodeURIComponent(`${window.location.origin}${window.location.pathname}`);
     // 1. Best: Direct server-side OAuth 2.0 redirect straight to facebook.com/v21.0/dialog/oauth!
     if (storage.isCloudOnline() && oa.facebookServerOAuth) {
-      window.location.href = storage.apiUrl('action=oauth_facebook_start');
+      window.location.href = storage.apiUrl(`action=oauth_facebook_start&returnTo=${returnTo}`);
       return;
     }
     // 2. Direct Facebook JS SDK login if Facebook App ID is configured in Admin Settings
@@ -322,8 +323,9 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
 
   const handleDirectGoogle = () => {
     const oa = getOAuth();
+    const returnTo = encodeURIComponent(`${window.location.origin}${window.location.pathname}`);
     if (storage.isCloudOnline() && oa.googleConfigured) {
-      window.location.href = storage.apiUrl('action=oauth_google_start');
+      window.location.href = storage.apiUrl(`action=oauth_google_start&returnTo=${returnTo}`);
       return;
     }
     // Switch cleanly into Gmail tab (strict @gmail.com + confirm Gmail)
@@ -336,7 +338,8 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
 
   const drawAuth = () => {
     const oa = getOAuth();
-    const fbCallback = oa.facebookCallbackUrl || `${window.location.origin}/api?action=oauth_facebook_callback`;
+    const backendOrigin = storage.apiOrigin || storage.getConfiguredCloudOrigin() || window.location.origin;
+    const fbCallback = oa.facebookCallbackUrl || `${backendOrigin}/api?action=oauth_facebook_callback`;
 
     if (oauthSetupInfo === 'facebook') {
       openModal(`
@@ -354,7 +357,7 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
               <code>${escapeHtml(fbCallback)}</code>
               <button type="button" class="btn btn-outline btn-xs" id="btn-copy-fb-cb">Sao chép</button>
             </div>
-            <div>3. Nhập <code>FACEBOOK_APP_ID</code> và <code>FACEBOOK_APP_SECRET</code> trong <strong>Netlify → Environment Variables</strong> (hoặc dán App ID vào Trang Quản Lý → Cài Đặt).</div>
+            <div>3. Nhập <code>FACEBOOK_APP_ID</code> và <code>FACEBOOK_APP_SECRET</code> trong <strong>Render / Netlify → Environment Variables</strong> (hoặc dán App ID vào Trang Quản Lý → Cài Đặt).</div>
           </div>
         </div>
         <button type="button" class="btn btn-primary" style="width:100%;margin-bottom:8px;" id="btn-back-auth">Đăng Nhập / Đăng Ký Nhanh Bằng Gmail hoặc SĐT</button>
@@ -1836,9 +1839,9 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
 
   try {
     const storeData = await storage.getPublicStore();
+    publicStore = storeData;
     settings = storeData.settings || {};
     if (Array.isArray(storeData.templates) && storeData.templates.length) {
-      liveTemplatesCache = storeData.templates;
       allTemplates = storeData.templates;
     }
     if (typeof storeData.paymentWebhookActive === 'boolean') {
@@ -2093,7 +2096,7 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
                 <div class="panel-card">
                   <div style="display:flex;gap:14px;align-items:center;">
                     ${inv.content?.heroPhoto
-                      ? `<img src="${escapeHtml(inv.content.heroPhoto)}" alt="Ảnh bìa" style="width:68px;height:88px;object-fit:cover;border-radius:10px;border:1px solid var(--ui-border);" />`
+                      ? `<img src="${escapeHtml(storage.resolveMediaUrl(inv.content.heroPhoto))}" alt="Ảnh bìa" style="width:68px;height:88px;object-fit:cover;border-radius:10px;border:1px solid var(--ui-border);" />`
                       : `<div style="width:68px;height:88px;border-radius:10px;background:var(--ui-brand-soft);display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--ui-brand);font-size:12px;">MẪU</div>`}
                     <div style="flex:1;">
                       <span class="badge badge-gold" style="margin-bottom:4px;">Mẫu bạn đã thiết kế</span>
@@ -2469,6 +2472,19 @@ window.addEventListener('popstate', route);
 
 (async function boot() {
   initGlobalWebFx();
+  storage.onCloudReady = async () => {
+    try {
+      publicStore = await storage.getPublicStore();
+      document.querySelectorAll('.brand-sub-status .status-dot.local').forEach(dot => {
+        dot.classList.remove('local');
+        dot.classList.add('online');
+      });
+      if (chatOpen) {
+        currentChatThread = await storage.getChatThread();
+        renderChatWidget();
+      }
+    } catch (_) {}
+  };
   await storage.detectBackend();
   const sp = new URLSearchParams(window.location.search);
   const oauthToken = sp.get('oauth_token');

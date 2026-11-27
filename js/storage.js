@@ -1,18 +1,19 @@
 /**
- * L'Amour Atelier — Hybrid Storage, Auth, Live Chat & Booking Client (v5)
- * Tự động kết nối PHP API (`api.php`) khi chạy trên XAMPP / Hosting PHP;
- * Tự động fallback mượt mà sang localStorage nếu mở tĩnh không có PHP.
+ * L'Amour Atelier — Hybrid Storage, Auth, Live Chat & Booking Client (v14)
+ * Tự động kết nối Render Cloud Backend / Netlify Functions (/api) hoặc PHP API (api.php);
+ * Hỗ trợ tự động đánh thức Render Free khi ngủ đông & fallback mượt sang localStorage.
  */
 
 import { createInitialSeedDb, TEMPLATES, DEFAULT_PACKAGES_V9, buildTrialConfig, createInvitationFromTemplate } from './data.js?v=14';
 import { runLocalChatbot, DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
+import { CLOUD_CONFIG } from './config.js?v=14';
 
 const LOCAL_KEY = 'lamour_wedding_studio_db_v5';
 const AUTH_TOKEN_KEY = 'lamour_auth_token_v5';
 const AUTH_USER_KEY = 'lamour_auth_user_v5';
 const CHAT_THREAD_KEY = 'lamour_chat_thread_id_v5';
-const CLOUD_API_ORIGIN_KEY = 'lamour_cloud_api_origin_v13';
-const DEFAULT_CLOUD_API_ORIGIN = 'https://frabjous-stardust-68eadc.netlify.app';
+const CLOUD_API_ORIGIN_KEY = 'lamour_cloud_api_origin_v14';
+const DEFAULT_CLOUD_API_ORIGIN = CLOUD_CONFIG.defaultCloudApiOrigin;
 const ADMIN_PASS_HASH = 'd54ddb187125b418d32c2e86b7706ffe729d53d6ef56222411145e583e7f75bd';
 
 export function isStrictGmail(email) {
@@ -113,13 +114,18 @@ async function hashLocalPassword(pw) {
 
 class StorageService {
   constructor() {
-    this.backendMode = 'checking'; // 'netlify' | 'php' | 'local'
+    this.backendMode = 'checking'; // 'render' | 'netlify' | 'php' | 'local'
+    this.backendEngine = '';
+    this.backendPersistent = true;
+    this.backendStorageWarning = '';
     this.apiBase = '';
     this.apiOrigin = '';
     this.oauthInfo = {};
     this.aiAgentReady = false;
     this.paymentWebhookActive = false;
     this.paymentWebhookUrl = '';
+    this.onCloudReady = null;
+    this._bgWakeInFlight = false;
     this.authToken = localStorage.getItem(AUTH_TOKEN_KEY) || '';
     try {
       this.currentUser = JSON.parse(localStorage.getItem(AUTH_USER_KEY) || 'null');
@@ -128,22 +134,46 @@ class StorageService {
     }
   }
 
-  getConfiguredCloudOrigin() {
+  parseValidHttpOrigin(rawUrl) {
     try {
-      const qsApi = new URLSearchParams(window.location.search).get('api');
-      if (qsApi && /^https?:\/\//i.test(qsApi)) {
-        const clean = qsApi.replace(/\/+$/, '').replace(/\/api$/i, '');
+      const u = new URL(String(rawUrl || '').trim());
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+      if (!u.hostname) return '';
+      return u.origin;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  getExplicitQueryCloudOrigin() {
+    try {
+      const qsApi = (new URLSearchParams(window.location.search).get('api') || '').trim();
+      if (!qsApi) return '';
+      if (qsApi.toLowerCase() === 'reset' || qsApi.toLowerCase() === 'default') {
+        localStorage.removeItem(CLOUD_API_ORIGIN_KEY);
+        return '';
+      }
+      const clean = this.parseValidHttpOrigin(qsApi);
+      if (clean) {
         localStorage.setItem(CLOUD_API_ORIGIN_KEY, clean);
         return clean;
       }
-      const saved = (localStorage.getItem(CLOUD_API_ORIGIN_KEY) || '').trim();
-      if (saved && /^https?:\/\//i.test(saved)) return saved.replace(/\/+$/, '').replace(/\/api$/i, '');
+    } catch (_) {}
+    return '';
+  }
+
+  getConfiguredCloudOrigin() {
+    const qs = this.getExplicitQueryCloudOrigin();
+    if (qs) return qs;
+    try {
+      const saved = this.parseValidHttpOrigin(localStorage.getItem(CLOUD_API_ORIGIN_KEY) || '');
+      if (saved) return saved;
     } catch (_) {}
     return DEFAULT_CLOUD_API_ORIGIN;
   }
 
   isCloudOnline() {
-    return this.backendMode === 'netlify' || this.backendMode === 'php';
+    return this.backendMode === 'render' || this.backendMode === 'netlify' || this.backendMode === 'php';
   }
 
   apiUrl(qs) {
@@ -156,6 +186,35 @@ class StorageService {
       return `${this.apiOrigin}${url}`;
     }
     return url;
+  }
+
+  resolveTemplateMedia(tpl) {
+    if (!tpl || typeof tpl !== 'object') return tpl;
+    if (tpl.design && typeof tpl.design.coverBackdrop === 'string' && tpl.design.coverBackdrop.startsWith('/api?')) {
+      tpl.design.coverBackdrop = this.resolveMediaUrl(tpl.design.coverBackdrop);
+    }
+    return tpl;
+  }
+
+  resolveInvitationMedia(inv) {
+    if (!inv || typeof inv !== 'object') return inv;
+    if (inv.content && typeof inv.content === 'object') {
+      if (typeof inv.content.heroPhoto === 'string') {
+        inv.content.heroPhoto = this.resolveMediaUrl(inv.content.heroPhoto);
+      }
+      if (Array.isArray(inv.content.gallery)) {
+        inv.content.gallery = inv.content.gallery.map(item =>
+          typeof item === 'string' ? this.resolveMediaUrl(item) : item
+        );
+      }
+    }
+    if (inv.design && typeof inv.design.coverBackdrop === 'string' && inv.design.coverBackdrop.startsWith('/api?')) {
+      inv.design.coverBackdrop = this.resolveMediaUrl(inv.design.coverBackdrop);
+    }
+    if (inv.music && typeof inv.music.customUrl === 'string') {
+      inv.music.customUrl = this.resolveMediaUrl(inv.music.customUrl);
+    }
+    return inv;
   }
 
   setSession(token, user) {
@@ -186,19 +245,36 @@ class StorageService {
     return h;
   }
 
-  async tryConnectNetlifyApi(baseEndpoint, originPrefix = '') {
+  async tryConnectCloudApi(baseEndpoint, originPrefix = '', timeoutMs = CLOUD_CONFIG.fastCloudTimeoutMs) {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+    let timedOut = false;
+    let timer = controller
+      ? setTimeout(() => {
+          timedOut = true;
+          controller.abort();
+        }, timeoutMs)
+      : null;
+    const clearTimer = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+    };
     try {
       const res = await fetch(`${baseEndpoint}?action=ping`, {
         cache: 'no-store',
         ...(controller ? { signal: controller.signal } : {}),
       });
+      clearTimer();
       const ct = (res.headers.get('content-type') || '').toLowerCase();
       if (res.ok && ct.includes('application/json')) {
         const data = await res.json();
         if (data && data.ok) {
-          this.backendMode = 'netlify';
+          const eng = String(data.engine || '');
+          this.backendMode = eng.startsWith('render-') ? 'render' : 'netlify';
+          this.backendEngine = eng || 'cloud-v14';
+          this.backendPersistent = data.persistent !== false;
+          this.backendStorageWarning = String(data.storageWarning || '');
           this.apiBase = baseEndpoint;
           this.apiOrigin = originPrefix;
           this.oauthInfo = data.oauth || {};
@@ -213,18 +289,55 @@ class StorageService {
             });
           }
           if (this.authToken) await this.verifySession();
-          return true;
+          return { connected: true, timedOut: false };
         }
       }
     } catch (_) {} finally {
-      if (timer) clearTimeout(timer);
+      clearTimer();
     }
-    return false;
+    return { connected: false, timedOut };
+  }
+
+  async tryConnectNetlifyApi(baseEndpoint, originPrefix = '', timeoutMs = CLOUD_CONFIG.fastCloudTimeoutMs) {
+    const r = await this.tryConnectCloudApi(baseEndpoint, originPrefix, timeoutMs);
+    return r.connected;
+  }
+
+  scheduleBackgroundWakeup(cloudOrigin) {
+    if (!cloudOrigin || this._bgWakeInFlight || this.isCloudOnline()) return;
+    this._bgWakeInFlight = true;
+    const maxAttempts = Math.max(1, Number(CLOUD_CONFIG.backgroundWakeRetries || 2));
+    setTimeout(async () => {
+      try {
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          if (this.isCloudOnline()) return;
+          const res = await this.tryConnectCloudApi(`${cloudOrigin}/api`, cloudOrigin, CLOUD_CONFIG.coldStartTimeoutMs);
+          if (res.connected) {
+            if (typeof this.onCloudReady === 'function') {
+              this.onCloudReady(this.backendMode);
+            }
+            return;
+          }
+          if (attempt < maxAttempts - 1) {
+            await new Promise(r => setTimeout(r, 1500));
+          }
+        }
+      } finally {
+        this._bgWakeInFlight = false;
+      }
+    }, 600);
   }
 
   async detectBackend() {
+    this.backendMode = 'checking';
     const isFile = window.location.protocol === 'file:';
-    const isGithubPages = window.location.hostname.endsWith('.github.io');
+    const host = window.location.hostname.toLowerCase();
+    const isGithubPages = host.endsWith('.github.io');
+    const isVercel = host.endsWith('.vercel.app');
+    const isNetlify = host.endsWith('.netlify.app');
+    const isRender = host.endsWith('.onrender.com');
+    const isStaticCloudHost = isGithubPages || isVercel || isNetlify || isRender;
+
     if (isFile) {
       this.backendMode = 'local';
       this.apiBase = '';
@@ -233,27 +346,59 @@ class StorageService {
       return 'local';
     }
 
-    const cloudOrigin = this.getConfiguredCloudOrigin();
+    const sp = new URLSearchParams(window.location.search);
+    const role = sp.get('role') || '';
+    const needsCloudNow = Boolean(
+      sp.get('oauth_token')
+      || ['guest', 'client', 'checkout', 'handover', 'admin', 'account'].includes(role)
+    );
+    const cloudTimeout = needsCloudNow ? CLOUD_CONFIG.coldStartTimeoutMs : CLOUD_CONFIG.fastCloudTimeoutMs;
 
-    // On GitHub Pages (*.github.io), connect directly over HTTPS CORS to our Netlify Cloud Backend (/api)!
-    if (isGithubPages) {
-      if (cloudOrigin && await this.tryConnectNetlifyApi(`${cloudOrigin}/api`, cloudOrigin)) {
-        return 'netlify';
+    const explicitApi = this.getExplicitQueryCloudOrigin();
+    const cloudOrigin = this.getConfiguredCloudOrigin();
+    const fallbackOrigins = (CLOUD_CONFIG.fallbackCloudApiOrigins || []).filter(
+      o => o && o !== cloudOrigin && o !== window.location.origin
+    );
+    let timedOutCloudOrigin = '';
+
+    // 0. If user explicitly passed ?api=https://..., connect directly to that backend first
+    if (explicitApi) {
+      const r = await this.tryConnectCloudApi(`${explicitApi}/api`, explicitApi, CLOUD_CONFIG.coldStartTimeoutMs);
+      if (r.connected) return this.backendMode;
+    }
+
+    // 1. On Vercel (*.vercel.app) & GitHub Pages (*.github.io), connect directly over HTTPS CORS to Render Backend
+    //    (skips probing nonexistent same-origin /api or api.php to prevent 404 console errors & speed up boot!)
+    if (isVercel || isGithubPages) {
+      if (cloudOrigin) {
+        const r = await this.tryConnectCloudApi(`${cloudOrigin}/api`, cloudOrigin, cloudTimeout);
+        if (r.connected) return this.backendMode;
+        if (r.timedOut && !needsCloudNow) timedOutCloudOrigin = cloudOrigin;
+      }
+      for (const fb of fallbackOrigins) {
+        const r = await this.tryConnectCloudApi(`${fb}/api`, fb, 4500);
+        if (r.connected) return this.backendMode;
       }
       this.backendMode = 'local';
       this.apiBase = '';
       this.apiOrigin = '';
       this.ensureLocalSeed();
+      if (timedOutCloudOrigin) this.scheduleBackgroundWakeup(timedOutCloudOrigin);
       return 'local';
     }
 
-    // 1. Try same-origin Netlify Functions Cloud Backend (/api) first
-    if (await this.tryConnectNetlifyApi('/api', '')) {
-      return 'netlify';
+    // 2. Try same-origin Cloud Backend (/api) first (works on Netlify, Render single-host, local Node, or custom domain proxy)
+    const sameOriginProbe = await this.tryConnectCloudApi(
+      '/api',
+      '',
+      CLOUD_CONFIG.sameOriginTimeoutMs
+    );
+    if (sameOriginProbe.connected) {
+      return this.backendMode;
     }
 
-    // 2. Try PHP Hosting / XAMPP Backend (api.php)
-    if (!window.location.hostname.endsWith('.netlify.app')) {
+    // 3. Try PHP Hosting / XAMPP Backend (api.php) — skip on static cloud hosts so raw api.php is never probed
+    if (!isStaticCloudHost) {
       try {
         const res = await fetch('api.php?action=ping', { cache: 'no-store' });
         const ct = (res.headers.get('content-type') || '').toLowerCase();
@@ -261,6 +406,9 @@ class StorageService {
           const data = await res.json();
           if (data && data.ok) {
             this.backendMode = 'php';
+            this.backendEngine = data.engine || 'php-json-v5';
+            this.backendPersistent = true;
+            this.backendStorageWarning = '';
             this.apiBase = 'api.php';
             this.apiOrigin = '';
             this.oauthInfo = data.oauth || {};
@@ -276,19 +424,28 @@ class StorageService {
           }
         }
       } catch (_) {}
+    }
 
-      // 3. Fallback to configured Cloud API origin for other static hosts
-      if (cloudOrigin && cloudOrigin !== window.location.origin) {
-        if (await this.tryConnectNetlifyApi(`${cloudOrigin}/api`, cloudOrigin)) {
-          return 'netlify';
-        }
+    // 4. Connect cross-origin to configured Render Cloud Backend (primary for Vercel Frontend!)
+    if (cloudOrigin && cloudOrigin !== window.location.origin) {
+      const r = await this.tryConnectCloudApi(`${cloudOrigin}/api`, cloudOrigin, cloudTimeout);
+      if (r.connected) return this.backendMode;
+      if (r.timedOut && !needsCloudNow) {
+        timedOutCloudOrigin = cloudOrigin;
       }
+    }
+
+    // 5. Try fallback cloud origin if primary backend is not yet deployed
+    for (const fb of fallbackOrigins) {
+      const r = await this.tryConnectCloudApi(`${fb}/api`, fb, 4500);
+      if (r.connected) return this.backendMode;
     }
 
     this.backendMode = 'local';
     this.apiBase = '';
     this.apiOrigin = '';
     this.ensureLocalSeed();
+    if (timedOutCloudOrigin) this.scheduleBackgroundWakeup(timedOutCloudOrigin);
     return 'local';
   }
 
@@ -432,7 +589,7 @@ class StorageService {
 
   async loginWithFacebookToken(accessToken) {
     if (!this.isCloudOnline()) {
-      throw new Error('Đăng nhập Facebook trực tiếp cần chạy trên Netlify Cloud Backend hoặc PHP Backend');
+      throw new Error('Đăng nhập Facebook trực tiếp cần kết nối Render / Netlify Cloud Backend hoặc PHP Backend');
     }
     const res = await fetch(this.apiUrl('action=auth_login'), {
       method: 'POST',
@@ -555,6 +712,9 @@ class StorageService {
       const data = await res.json();
       if (data.ok && data.initialized) {
         if (data.oauth) this.oauthInfo = data.oauth;
+        if (typeof data.paymentWebhookActive === 'boolean') this.paymentWebhookActive = data.paymentWebhookActive;
+        if (data.paymentWebhookUrl) this.paymentWebhookUrl = data.paymentWebhookUrl;
+        if (Array.isArray(data.templates)) data.templates.forEach(t => this.resolveTemplateMedia(t));
         return data;
       }
     }
@@ -574,6 +734,7 @@ class StorageService {
       const res = await fetch(this.apiUrl('action=customer_portal_data'), { headers: this.authHeaders(), cache: 'no-store' });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Vui lòng đăng nhập');
+      if (Array.isArray(data.invitations)) data.invitations.forEach(inv => this.resolveInvitationMedia(inv));
       return data;
     }
     const db = this.readLocalDb();
@@ -597,6 +758,8 @@ class StorageService {
       const res = await fetch(this.apiUrl('action=admin_db'), { headers: this.authHeaders(), cache: 'no-store' });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Cần đăng nhập tài khoản Quản trị');
+      if (Array.isArray(data.db?.invitations)) data.db.invitations.forEach(inv => this.resolveInvitationMedia(inv));
+      if (Array.isArray(data.db?.templates)) data.db.templates.forEach(t => this.resolveTemplateMedia(t));
       return data.db;
     }
     if (!this.currentUser || this.currentUser.role !== 'admin') throw new Error('Cần đăng nhập tài khoản Quản trị');
@@ -832,6 +995,7 @@ class StorageService {
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không kiểm tra được trạng thái thanh toán');
       this.paymentWebhookActive = Boolean(data.webhookActive);
+      if (data.invitation) this.resolveInvitationMedia(data.invitation);
       return data;
     }
     const db = this.readLocalDb();
@@ -860,6 +1024,7 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Chưa nhận được thông báo thanh toán từ ngân hàng');
+      if (data.invitation) this.resolveInvitationMedia(data.invitation);
       return data;
     }
     const db = this.readLocalDb();
@@ -894,7 +1059,7 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể khởi tạo mẫu thiệp');
-      return data.invitation;
+      return this.resolveInvitationMedia(data.invitation);
     }
     const db = this.readLocalDb();
     const u = this.currentUser;
@@ -1104,6 +1269,8 @@ class StorageService {
       const res = await fetch(url, { headers, cache: 'no-store' });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không tìm thấy thiệp');
+      if (data.invitation) this.resolveInvitationMedia(data.invitation);
+      if (Array.isArray(data.templates)) data.templates.forEach(t => this.resolveTemplateMedia(t));
       return data;
     }
     const db = this.readLocalDb();
@@ -1136,7 +1303,7 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Lỗi lưu thông tin khách hàng');
-      return data.invitation;
+      return this.resolveInvitationMedia(data.invitation);
     }
     const db = this.readLocalDb();
     const idx = db.invitations.findIndex(i => i.id === id);

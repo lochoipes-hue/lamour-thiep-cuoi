@@ -67,7 +67,15 @@ export const COVER_BACKDROPS = [
 
 export function resolveBackdropUrl(idOrUrl) {
   if (!idOrUrl || idOrUrl === 'none') return '';
-  if (idOrUrl.startsWith('http') || idOrUrl.startsWith('data:') || idOrUrl.startsWith('data/')) return idOrUrl;
+  if (
+    idOrUrl.startsWith('http')
+    || idOrUrl.startsWith('data:')
+    || idOrUrl.startsWith('data/')
+    || idOrUrl.startsWith('/api?')
+    || idOrUrl.startsWith('/')
+  ) {
+    return idOrUrl;
+  }
   const preset = COVER_BACKDROPS.find(b => b.id === idOrUrl);
   return preset ? preset.url : COVER_BACKDROPS[0].url;
 }

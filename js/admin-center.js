@@ -991,16 +991,18 @@ export class AdminManagementCenter {
     const activeThread = threads.find(t => t.id === this.selectedThreadId) || null;
     const quickReplies = this.db.chatbotConfig?.adminQuickReplies || DEFAULT_CHATBOT_CONFIG.adminQuickReplies;
     const isCloud = storage.isCloudOnline();
-    const syncBannerText = storage.backendMode === 'netlify'
-      ? 'Đang kết nối Netlify Cloud Backend — Tin nhắn khách hàng từ mọi điện thoại & máy tính tự động hiển thị trực tiếp tại đây.'
-      : storage.backendMode === 'php'
-        ? 'Đang kết nối máy chủ PHP — Tin nhắn khách hàng từ mọi điện thoại & máy tính tự động hiển thị trực tiếp tại đây.'
-        : 'Chế độ Web Tĩnh (Local) — Tự động đồng bộ giữa các tab cùng trình duyệt. Hãy deploy kèm Netlify Functions (/api) hoặc PHP Hosting để nhận chat từ điện thoại khách ở xa.';
+    const syncBannerText = storage.backendMode === 'render'
+      ? `Đang kết nối Render Cloud Backend (${storage.backendEngine || 'render'}) — Tin nhắn khách hàng từ mọi điện thoại & máy tính tự động hiển thị trực tiếp tại đây.${storage.backendStorageWarning ? ' Lưu ý: ' + storage.backendStorageWarning : ''}`
+      : storage.backendMode === 'netlify'
+        ? 'Đang kết nối Netlify Cloud Backend — Tin nhắn khách hàng từ mọi điện thoại & máy tính tự động hiển thị trực tiếp tại đây.'
+        : storage.backendMode === 'php'
+          ? 'Đang kết nối máy chủ PHP — Tin nhắn khách hàng từ mọi điện thoại & máy tính tự động hiển thị trực tiếp tại đây.'
+          : 'Chế độ Web Tĩnh (Local) — Tự động đồng bộ giữa các tab cùng trình duyệt. Hãy kết nối Render Cloud Backend (/api) hoặc PHP Hosting để nhận chat từ điện thoại khách ở xa.';
 
     host.innerHTML = `
       <div class="livechat-sync-bar ${isCloud ? 'is-php' : 'is-local'}">
         <span class="status-dot ${isCloud ? 'online' : 'local'}"></span>
-        <span>${syncBannerText}</span>
+        <span>${escapeHtml(syncBannerText)}</span>
       </div>
 
       <div class="livechat-shell">
@@ -1175,11 +1177,11 @@ export class AdminManagementCenter {
         <div style="border:1px solid #d5e6db;background:#f3faf5;border-radius:12px;padding:13px 14px;margin-bottom:14px;">
           <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
             <div>
-              <strong style="font-size:13.5px;color:#115935;">Trợ Lý AI Agent (Google Gemini qua Netlify AI Gateway)</strong>
+              <strong style="font-size:13.5px;color:#115935;">Trợ Lý AI Agent (Google Gemini trên Render / Cloud Backend)</strong>
               <div style="font-size:11.5px;color:#33644a;margin-top:2px;">
                 ${storage.aiAgentReady
-                  ? 'Trạng thái: Đã sẵn sàng AI Gateway — Tự động hiểu câu hỏi tự do, nhớ ngữ cảnh hội thoại và tính Ngũ Hành chuẩn xác.'
-                  : 'Trạng thái: Tự động kích hoạt ngay khi deploy lên Netlify (Netlify AI Gateway miễn phí cấu hình key) hoặc gắn GEMINI_API_KEY; khi offline dùng bộ AI Ngũ Hành + Kịch bản thông minh.'}
+                  ? 'Trạng thái: Đã sẵn sàng Gemini AI — Tự động hiểu câu hỏi tự do, nhớ ngữ cảnh hội thoại và tính Ngũ Hành chuẩn xác.'
+                  : 'Trạng thái: Thêm GEMINI_API_KEY trong Render Environment Variables (hoặc dùng Netlify AI Gateway) để bật AI Gemini; khi chưa gắn key sẽ dùng bộ AI Ngũ Hành + Kịch bản thông minh.'}
               </div>
             </div>
             <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;cursor:pointer;">
@@ -1373,7 +1375,7 @@ export class AdminManagementCenter {
             <div style="margin-bottom:10px;">
               <div style="font-size:11.5px;font-weight:700;color:var(--ui-brand);margin-bottom:4px;">Webhook URL (dán vào SePay → Tích hợp Webhook → URL nhận thông báo):</div>
               <div class="link-box">
-                <code id="webhook-url-code">${escapeHtml(storage.paymentWebhookUrl || 'https://frabjous-stardust-68eadc.netlify.app/api?action=payment_webhook')}</code>
+                <code id="webhook-url-code">${escapeHtml(storage.paymentWebhookUrl || `${storage.apiOrigin || storage.getConfiguredCloudOrigin()}/api?action=payment_webhook`)}</code>
                 <button type="button" class="btn btn-outline btn-xs" id="btn-copy-webhook-url">Sao chép URL</button>
               </div>
             </div>
@@ -1402,15 +1404,15 @@ export class AdminManagementCenter {
 
           <h4 style="margin:22px 0 8px;font-size:14px;">Kết Nối Đăng Nhập Nhanh Facebook &amp; Google (OAuth 2.0)</h4>
           <p style="font-size:12px;color:var(--ui-muted);margin:0 0 10px;line-height:1.5;">
-            Dán <strong>Facebook App ID</strong> (từ developers.facebook.com) và cấu hình thêm <code>FACEBOOK_APP_SECRET</code>, <code>GOOGLE_CLIENT_SECRET</code>, <code>RESEND_API_KEY</code> (gửi OTP Gmail thật) trong mục <strong>Netlify → Environment Variables</strong>.
+            Dán <strong>Facebook App ID</strong> (từ developers.facebook.com) và cấu hình thêm <code>FACEBOOK_APP_SECRET</code>, <code>GOOGLE_CLIENT_SECRET</code>, <code>RESEND_API_KEY</code> (gửi OTP Gmail thật), <code>GEMINI_API_KEY</code>, <code>SEPAY_API_KEY</code>, <code>DATABASE_URL</code> trong mục <strong>Render → Environment Variables</strong> (hoặc Netlify).
           </p>
           <div class="grid-2">
             <div class="form-group"><label>Facebook App ID (liên kết thẳng đăng nhập Facebook)</label><input class="input" name="facebookAppId" value="${escapeHtml(s.facebookAppId || '')}" placeholder="VD: 123456789012345" /></div>
             <div class="form-group"><label>Google Client ID (đăng nhập trực tiếp Gmail)</label><input class="input" name="googleClientId" value="${escapeHtml(s.googleClientId || '')}" placeholder="VD: 12345-xxx.apps.googleusercontent.com" /></div>
           </div>
           <div style="font-size:11.5px;color:var(--ui-muted);background:var(--ui-surface-soft);border:1px solid var(--ui-border);border-radius:10px;padding:10px 12px;">
-            <div><strong>Facebook Callback URL:</strong> <code>${escapeHtml(`${window.location.origin}/api?action=oauth_facebook_callback`)}</code></div>
-            <div style="margin-top:4px;"><strong>Google Callback URL:</strong> <code>${escapeHtml(`${window.location.origin}/api?action=oauth_google_callback`)}</code></div>
+            <div><strong>Facebook Callback URL:</strong> <code>${escapeHtml(storage.oauthInfo?.facebookCallbackUrl || `${storage.apiOrigin || storage.getConfiguredCloudOrigin()}/api?action=oauth_facebook_callback`)}</code></div>
+            <div style="margin-top:4px;"><strong>Google Callback URL:</strong> <code>${escapeHtml(storage.oauthInfo?.googleCallbackUrl || `${storage.apiOrigin || storage.getConfiguredCloudOrigin()}/api?action=oauth_google_callback`)}</code></div>
           </div>
 
           <button type="submit" class="btn btn-primary" style="margin-top:20px;">Lưu Toàn Bộ Cài Đặt</button>
