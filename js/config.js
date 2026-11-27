@@ -8,7 +8,7 @@
  */
 
 export const CLOUD_CONFIG = {
-  defaultCloudApiOrigin: 'https://lamour-cloud-backend.onrender.com',
+  defaultCloudApiOrigin: 'https://lamour-cloud-backend-hv4z.onrender.com',
   // Keep empty by default so a Render cold start NEVER splits live orders/webhooks to a different database!
   fallbackCloudApiOrigins: [],
   sameOriginTimeoutMs: 4000,
