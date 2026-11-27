@@ -1,26 +1,26 @@
 /**
- * L'Amour Atelier — Trang Quản Lý Toàn Diện (Admin Management Center)
+ * DaiLo Wedding — Trang Quản Lý Toàn Diện (Admin Management Center)
  * Gồm đầy đủ 7 phân hệ đồng bộ thẩm mỹ với trang chính:
  *  1. Lịch Sử Đã Mua & Quản Lý Thiệp Khách Hàng (kèm xuất Excel doanh thu)
  *  2. Quản Lý Đặt Lịch Tư Vấn (Booking Scheduler)
  *  3. Sửa, Xóa, Thêm Mẫu Thiệp (Full CRUD + Mở Trình Thiết Kế Trực Quan)
  *  4. Khung Chat Trực Tiếp 2 Chiều (2-Pane Live Inbox + Trả Lời Nhanh)
  *  5. Quản Lý Chat Bot Tự Động & Câu Chat Nhanh
- *  6. Quản Lý Tài Khoản Khách Hàng (Gmail / SĐT / Facebook)
- *  7. Cấu Hình Thương Hiệu, MB Bank VietQR & 4 Gói Dịch Vụ
+ *  6. Quản Lý Tài Khoản Khách Hàng (Gmail / SĐT OTP / Liên kết Facebook & Google)
+ *  7. Cấu Hình Thương Hiệu, MB Bank VietQR, OAuth & OTP, 4 Gói Dịch Vụ
  */
 
 import {
   TEMPLATES,
   VIET_BANKS,
   createInvitationFromTemplate,
-} from './data.js?v=14';
-import { COVER_BACKDROPS } from './artwork.js?v=14';
-import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
-import { storage, sanitizeVnPhone10, validateVnPhone10 } from './storage.js?v=14';
-import { escapeHtml } from './renderer.js?v=14';
-import { buildAbsoluteUrl } from './studio.js?v=14';
-import { icon } from './icons.js?v=14';
+} from './data.js?v=15';
+import { COVER_BACKDROPS } from './artwork.js?v=15';
+import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=15';
+import { storage, sanitizeVnPhone10, validateVnPhone10 } from './storage.js?v=15';
+import { escapeHtml } from './renderer.js?v=15';
+import { buildAbsoluteUrl } from './studio.js?v=15';
+import { icon } from './icons.js?v=15';
 
 function formatVnd(n) {
   return Number(n || 0).toLocaleString('vi-VN') + 'đ';
@@ -225,9 +225,9 @@ export class AdminManagementCenter {
     this.root.innerHTML = `
       <header class="top-nav">
         <div class="brand-mark" data-go-store>
-          <div class="brand-monogram">L</div>
+          <div class="brand-monogram">DL</div>
           <div>
-            <div class="brand-script-name">${escapeHtml(this.db.settings?.brandName || "L'Amour Atelier")}</div>
+            <div class="brand-script-name">${escapeHtml(this.db.settings?.brandName || 'DaiLo Wedding')}</div>
             <div class="brand-sub-status">
               <span class="status-dot ${storage.isCloudOnline() ? 'online' : 'local'}"></span>
               <span>Trung Tâm Quản Lý • ${escapeHtml(this.user?.email || 'lochoipes@gmail.com')}</span>
@@ -1310,7 +1310,7 @@ export class AdminManagementCenter {
                 <th>Họ Tên</th>
                 <th>Gmail / Email</th>
                 <th>Số Điện Thoại</th>
-                <th>Kênh Đăng Ký</th>
+                <th>Kênh &amp; Liên Kết</th>
                 <th>Phân Quyền</th>
                 <th>Ngày Tạo</th>
               </tr>
@@ -1319,9 +1319,21 @@ export class AdminManagementCenter {
               ${users.map(u => `
                 <tr>
                   <td><strong>${escapeHtml(u.name || '—')}</strong></td>
-                  <td>${escapeHtml(u.email || '—')}</td>
-                  <td>${escapeHtml(u.phone || '—')}</td>
-                  <td><span class="badge badge-trial">${escapeHtml((u.provider || 'gmail').toUpperCase())}</span></td>
+                  <td>
+                    ${escapeHtml(u.email || '—')}
+                    ${u.emailVerified ? `<span class="badge badge-paid" style="margin-left:4px;">Đã xác thực</span>` : ''}
+                  </td>
+                  <td>
+                    ${escapeHtml(u.phone || '—')}
+                    ${u.phoneVerified ? `<span class="badge badge-paid" style="margin-left:4px;">OTP</span>` : ''}
+                  </td>
+                  <td>
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                      <span class="badge badge-trial">${escapeHtml((u.provider || 'gmail').toUpperCase())}</span>
+                      ${u.facebookId ? `<span class="badge" style="background:#e8f1fe;color:#1877f2;">Facebook</span>` : ''}
+                      ${u.googleId ? `<span class="badge" style="background:#fdecea;color:#c5221f;">Google</span>` : ''}
+                    </div>
+                  </td>
                   <td><span class="badge ${u.role === 'admin' ? 'badge-brand' : 'badge-paid'}">${u.role === 'admin' ? 'Quản Trị Viên' : 'Khách Hàng'}</span></td>
                   <td style="font-size:12px;color:var(--ui-muted);">${formatDateTime(u.createdAt)}</td>
                 </tr>
@@ -1402,17 +1414,28 @@ export class AdminManagementCenter {
             `).join('')}
           </div>
 
-          <h4 style="margin:22px 0 8px;font-size:14px;">Kết Nối Đăng Nhập Nhanh Facebook &amp; Google (OAuth 2.0)</h4>
+          <h4 style="margin:22px 0 8px;font-size:14px;">Kết Nối Đăng Nhập &amp; Liên Kết Tài Khoản Facebook, Google (OAuth 2.0) &amp; Mã OTP</h4>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+            <span class="badge ${storage.oauthInfo?.facebookConfigured ? 'badge-paid' : 'badge-trial'}">Facebook: ${storage.oauthInfo?.facebookServerOAuth ? 'OAuth 2.0 Server' : storage.oauthInfo?.facebookConfigured ? 'JS SDK' : 'Chưa gắn App ID'}</span>
+            <span class="badge ${storage.oauthInfo?.googleConfigured ? 'badge-paid' : 'badge-trial'}">Google: ${storage.oauthInfo?.googleServerOAuth ? 'OAuth 2.0 Server' : storage.oauthInfo?.googleConfigured ? 'Google GIS' : 'Chưa gắn Client ID'}</span>
+            <span class="badge ${storage.oauthInfo?.gmailOtpConfigured ? 'badge-paid' : 'badge-deposit'}">OTP Gmail: ${storage.oauthInfo?.gmailOtpConfigured ? 'Gửi Email thật' : 'Xác thực tức thì (chưa gắn Resend/Brevo)'}</span>
+            <span class="badge ${storage.oauthInfo?.phoneOtpConfigured ? 'badge-paid' : 'badge-deposit'}">OTP SĐT: ${storage.oauthInfo?.phoneOtpConfigured ? 'Gửi SMS thật' : 'Xác thực tức thì (chưa gắn eSMS/Twilio)'}</span>
+          </div>
           <p style="font-size:12px;color:var(--ui-muted);margin:0 0 10px;line-height:1.5;">
-            Dán <strong>Facebook App ID</strong> (từ developers.facebook.com) và cấu hình thêm <code>FACEBOOK_APP_SECRET</code>, <code>GOOGLE_CLIENT_SECRET</code>, <code>RESEND_API_KEY</code> (gửi OTP Gmail thật), <code>GEMINI_API_KEY</code>, <code>SEPAY_API_KEY</code>, <code>DATABASE_URL</code> trong mục <strong>Render → Environment Variables</strong> (hoặc Netlify).
+            Dán <strong>Facebook App ID</strong> (từ developers.facebook.com), <strong>Google Client ID</strong> (từ console.cloud.google.com) và cấu hình thêm <code>FACEBOOK_APP_SECRET</code>, <code>GOOGLE_CLIENT_SECRET</code>, <code>RESEND_API_KEY</code> / <code>BREVO_API_KEY</code> (gửi OTP Gmail thật), <code>ESMS_API_KEY</code> / <code>TWILIO_*</code> (gửi SMS OTP thật) trong mục <strong>Render → Environment Variables</strong>.
           </p>
           <div class="grid-2">
-            <div class="form-group"><label>Facebook App ID (liên kết thẳng đăng nhập Facebook)</label><input class="input" name="facebookAppId" value="${escapeHtml(s.facebookAppId || '')}" placeholder="VD: 123456789012345" /></div>
-            <div class="form-group"><label>Google Client ID (đăng nhập trực tiếp Gmail)</label><input class="input" name="googleClientId" value="${escapeHtml(s.googleClientId || '')}" placeholder="VD: 12345-xxx.apps.googleusercontent.com" /></div>
+            <div class="form-group"><label>Facebook App ID (đăng nhập &amp; liên kết Facebook)</label><input class="input" name="facebookAppId" value="${escapeHtml(s.facebookAppId || '')}" placeholder="VD: 123456789012345" /></div>
+            <div class="form-group"><label>Google Client ID (đăng nhập &amp; liên kết Google)</label><input class="input" name="googleClientId" value="${escapeHtml(s.googleClientId || '')}" placeholder="VD: 12345-xxx.apps.googleusercontent.com" /></div>
           </div>
-          <div style="font-size:11.5px;color:var(--ui-muted);background:var(--ui-surface-soft);border:1px solid var(--ui-border);border-radius:10px;padding:10px 12px;">
+          <div class="grid-2">
+            <div class="form-group"><label>Webhook Gửi OTP Email (tùy chọn — Apps Script / n8n)</label><input class="input" name="otpEmailWebhookUrl" value="${escapeHtml(s.otpEmailWebhookUrl || '')}" placeholder="https://..." /></div>
+            <div class="form-group"><label>Webhook Gửi OTP SMS/Zalo ZNS (tùy chọn)</label><input class="input" name="otpSmsWebhookUrl" value="${escapeHtml(s.otpSmsWebhookUrl || '')}" placeholder="https://..." /></div>
+          </div>
+          <div style="font-size:11.5px;color:var(--ui-muted);background:var(--ui-surface-soft);border:1px solid var(--ui-border);border-radius:10px;padding:10px 12px;line-height:1.7;">
             <div><strong>Facebook Callback URL:</strong> <code>${escapeHtml(storage.oauthInfo?.facebookCallbackUrl || `${storage.apiOrigin || storage.getConfiguredCloudOrigin()}/api?action=oauth_facebook_callback`)}</code></div>
-            <div style="margin-top:4px;"><strong>Google Callback URL:</strong> <code>${escapeHtml(storage.oauthInfo?.googleCallbackUrl || `${storage.apiOrigin || storage.getConfiguredCloudOrigin()}/api?action=oauth_google_callback`)}</code></div>
+            <div><strong>Google Callback URL:</strong> <code>${escapeHtml(storage.oauthInfo?.googleCallbackUrl || `${storage.apiOrigin || storage.getConfiguredCloudOrigin()}/api?action=oauth_google_callback`)}</code></div>
+            <div><strong>Authorized JavaScript Origin (cho Google GIS / Facebook SDK):</strong> <code>${escapeHtml(window.location.origin)}</code></div>
           </div>
 
           <button type="submit" class="btn btn-primary" style="margin-top:20px;">Lưu Toàn Bộ Cài Đặt</button>
@@ -1441,9 +1464,12 @@ export class AdminManagementCenter {
       this.db.settings.paymentWebhookSecret = (fd.get('paymentWebhookSecret') || '').toString().trim();
       this.db.settings.facebookAppId = (fd.get('facebookAppId') || '').toString().trim();
       this.db.settings.googleClientId = (fd.get('googleClientId') || '').toString().trim();
+      this.db.settings.otpEmailWebhookUrl = (fd.get('otpEmailWebhookUrl') || '').toString().trim();
+      this.db.settings.otpSmsWebhookUrl = (fd.get('otpSmsWebhookUrl') || '').toString().trim();
       host.querySelectorAll('[data-pkg]').forEach(el => { const [i, f] = el.dataset.pkg.split(':'); this.db.settings.packages[Number(i)][f] = el.value; });
       host.querySelectorAll('[data-pkg-num]').forEach(el => { const [i, f] = el.dataset.pkgNum.split(':'); this.db.settings.packages[Number(i)][f] = Number(el.value) || 0; });
       await this.persist('Đã lưu cài đặt hệ thống');
+      try { await storage.getPublicStore(); } catch (_) {}
       this.renderShell();
     });
   }
@@ -1501,7 +1527,7 @@ export class AdminManagementCenter {
       const groom = fd.get('groomName').toString().trim();
       const bride = fd.get('brideName').toString().trim();
       const tplId = fd.get('templateId').toString();
-      const pkg = pkgs[Number(fd.get('pkgIdx'))] || { name: 'Gói Tiêu Chuẩn 3D', price: 229000 };
+      const pkg = pkgs[Number(fd.get('pkgIdx'))] || { name: 'Gói Tiêu Chuẩn', price: 189000 };
       const status = fd.get('status').toString();
 
       const slug = (groom + '-' + bride)

@@ -1,8 +1,8 @@
 /**
- * L'Amour Atelier — Bộ Điều Phối Trung Tâm (v5)
- * - Đã bỏ 2 nút "Cổng Khách Hàng" & "Quản Trị Studio" khỏi đầu trang -> Thay bằng Đăng Nhập / Tài Khoản phân quyền tự động!
- * - Đăng nhập & Đăng ký Gmail / Số điện thoại / Facebook (Tài khoản Quản Lý: lochoipes@gmail.com)
- * - Cổng Khách Hàng cá nhân (Lịch sử mua, Thiệp của tôi, Đặt lịch)
+ * DaiLo Wedding — Bộ Điều Phối Trung Tâm (v15)
+ * - Đăng nhập & Liên kết tài khoản trực tiếp Facebook OAuth 2.0 & Google OAuth 2.0 / GIS
+ * - Đăng ký bắt buộc xác thực mã OTP 6 số gửi về Số điện thoại hoặc Gmail (Tài khoản Quản Lý: lochoipes@gmail.com)
+ * - Cổng Khách Hàng cá nhân (Liên kết Facebook/Google, Lịch sử mua, Thiệp của tôi, Đặt lịch)
  * - Trang Quản Lý Toàn Diện (AdminManagementCenter)
  * - Khung Chat Trực Tiếp 2 chiều + Chat Bot tự động + Câu Chat Nhanh + Đặt Lịch Tư Vấn + VietQR MB Bank 0354248177
  */
@@ -12,21 +12,21 @@ import {
   NGU_HANH_DATA,
   getTrialState,
   createInvitationFromTemplate,
-} from './data.js?v=14';
+} from './data.js?v=15';
 import {
   EDITORIAL_SAMPLE_PHOTOS,
   getWaxSealSvg,
   getCoverFiligreeFrameSvg,
   resolveBackdropUrl,
-} from './artwork.js?v=14';
-import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
-import { storage, isStrictGmail, sanitizeVnPhone10, validateVnPhone10, isValidVnPhone10 } from './storage.js?v=14';
-import { InvitationRenderer, escapeHtml } from './renderer.js?v=14';
-import { StudioEditor, buildAbsoluteUrl } from './studio.js?v=14';
-import { AdminManagementCenter } from './admin-center.js?v=14';
-import { musicEngine } from './audio-fx.js?v=14';
-import { icon } from './icons.js?v=14';
-import { initGlobalWebFx, bindInteractiveTiltCards, bindScrollStagger } from './web-fx.js?v=14';
+} from './artwork.js?v=15';
+import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=15';
+import { storage, isStrictGmail, sanitizeVnPhone10, validateVnPhone10, isValidVnPhone10 } from './storage.js?v=15';
+import { InvitationRenderer, escapeHtml } from './renderer.js?v=15';
+import { StudioEditor, buildAbsoluteUrl } from './studio.js?v=15';
+import { AdminManagementCenter } from './admin-center.js?v=15';
+import { musicEngine } from './audio-fx.js?v=15';
+import { icon } from './icons.js?v=15';
+import { initGlobalWebFx, bindInteractiveTiltCards, bindScrollStagger } from './web-fx.js?v=15';
 
 const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modal-root');
@@ -98,12 +98,22 @@ function cleanupActive() {
   musicEngine.stop();
 }
 
+let activeModalCleanup = null;
+
 function closeModal() {
+  if (typeof activeModalCleanup === 'function') {
+    try { activeModalCleanup(); } catch (_) {}
+    activeModalCleanup = null;
+  }
   modalRoot.innerHTML = '';
   document.body.classList.remove('modal-open');
 }
 
-function openModal(html, { wide = false, cardClass = '' } = {}) {
+function openModal(html, { wide = false, cardClass = '', preserveCleanup = false } = {}) {
+  if (!preserveCleanup && typeof activeModalCleanup === 'function') {
+    try { activeModalCleanup(); } catch (_) {}
+    activeModalCleanup = null;
+  }
   document.body.classList.add('modal-open');
   modalRoot.innerHTML = `
     <div class="modal-backdrop" data-modal-bg>
@@ -189,6 +199,10 @@ function buildOwnerVietQrUrl(settings, amount = 0, memo = 'DAT THIEP CUOI') {
 
 function openShareLinksModal(inv, mode = 'admin') {
   if (!inv) return;
+  if (mode === 'client' && inv.order?.status !== 'paid') {
+    showToast('Vui lòng hoàn tất thanh toán để nhận đường link thiệp cưới chính thức.', 'info');
+    return;
+  }
   const guestUrl = buildAbsoluteUrl({ role: 'guest', id: inv.id });
   const blankUrl = buildAbsoluteUrl({ role: 'guest', id: inv.id, blank: '1' });
   const clientUrl = buildAbsoluteUrl({ role: 'client', id: inv.id, token: inv.clientToken || '' });
@@ -244,8 +258,11 @@ function openShareLinksModal(inv, mode = 'admin') {
 }
 
 /* ============================================================================
-   MODAL ĐĂNG NHẬP & ĐĂNG KÝ PHÂN TÀI KHOẢN (GMAIL / SĐT / FACEBOOK)
+   MODAL ĐĂNG NHẬP, ĐĂNG KÝ XÁC THỰC MÃ OTP & LIÊN KẾT FACEBOOK / GOOGLE
    ============================================================================ */
+const FACEBOOK_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M22 12a10 10 0 1 0-11.56 9.88v-6.99H7.9V12h2.54V9.8c0-2.5 1.49-3.89 3.77-3.89 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56V12h2.78l-.44 2.89h-2.34v6.99A10 10 0 0 0 22 12Z"/></svg>';
+const GOOGLE_ICON_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path fill="#EA4335" d="M12 10.2v3.9h5.45c-.24 1.26-.96 2.33-2.04 3.04l3.3 2.56c1.92-1.77 3.03-4.38 3.03-7.48 0-.72-.06-1.42-.19-2.02H12z"/><path fill="#34A853" d="M12 22c2.75 0 5.06-.91 6.75-2.46l-3.3-2.56c-.91.61-2.08.98-3.45.98-2.65 0-4.9-1.79-5.7-4.2H2.89v2.64A10 10 0 0 0 12 22z"/><path fill="#4A90E2" d="M6.3 13.76a5.98 5.98 0 0 1 0-3.52V7.6H2.89a10 10 0 0 0 0 8.8l3.41-2.64z"/><path fill="#FBBC05" d="M12 6.04c1.5 0 2.84.51 3.9 1.52l2.92-2.92C17.05 2.99 14.74 2 12 2A10 10 0 0 0 2.89 7.6l3.41 2.64c.8-2.41 3.05-4.2 5.7-4.2z"/></svg>';
+
 let fbSdkLoadedAppId = '';
 function loadFacebookSdk(appId) {
   return new Promise((resolve, reject) => {
@@ -269,222 +286,689 @@ function loadFacebookSdk(appId) {
   });
 }
 
-function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
-  let activeTab = defaultTab; // 'login' | 'register'
-  let loginMethod = 'gmail'; // 'gmail' | 'phone'
-  let regProvider = 'gmail'; // 'gmail' | 'phone'
-  let oauthSetupInfo = null; // null | 'facebook' | 'google'
-  let otpSentForEmail = '';
+let googleGisPromise = null;
+function loadGoogleGisSdk() {
+  if (window.google?.accounts?.oauth2) return Promise.resolve(window.google);
+  if (googleGisPromise) return googleGisPromise;
+  googleGisPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById('google-gis-sdk');
+    if (existing) existing.remove();
+    const s = document.createElement('script');
+    s.id = 'google-gis-sdk';
+    s.async = true;
+    s.defer = true;
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = () => {
+      if (window.google?.accounts?.oauth2) resolve(window.google);
+      else { googleGisPromise = null; reject(new Error('Google Identity Services không khởi tạo được')); }
+    };
+    s.onerror = () => { googleGisPromise = null; reject(new Error('Không tải được Google Identity Services')); };
+    document.head.appendChild(s);
+  });
+  return googleGisPromise;
+}
 
-  const getOAuth = () => ({
+function getOAuthConfig() {
+  const fbAppId = (publicStore?.oauth?.facebookAppId || storage.oauthInfo?.facebookAppId || publicStore?.settings?.facebookAppId || '').trim();
+  const gClientId = (publicStore?.oauth?.googleClientId || storage.oauthInfo?.googleClientId || publicStore?.settings?.googleClientId || '').trim();
+  return {
     ...(storage.oauthInfo || {}),
     ...(publicStore?.oauth || {}),
-    facebookAppId: (publicStore?.oauth?.facebookAppId || storage.oauthInfo?.facebookAppId || publicStore?.settings?.facebookAppId || '').trim(),
-    googleClientId: (publicStore?.oauth?.googleClientId || storage.oauthInfo?.googleClientId || publicStore?.settings?.googleClientId || '').trim(),
-  });
+    facebookAppId: fbAppId,
+    facebookConfigured: Boolean(fbAppId || storage.oauthInfo?.facebookConfigured || publicStore?.oauth?.facebookConfigured),
+    googleClientId: gClientId,
+    googleConfigured: Boolean(gClientId || storage.oauthInfo?.googleConfigured || publicStore?.oauth?.googleConfigured),
+  };
+}
 
-  const handleDirectFacebook = async () => {
-    const oa = getOAuth();
-    const returnTo = encodeURIComponent(`${window.location.origin}${window.location.pathname}`);
-    // 1. Best: Direct server-side OAuth 2.0 redirect straight to facebook.com/v21.0/dialog/oauth!
+function openSocialSetupInfoModal(provider, { onBack = null } = {}) {
+  const oa = getOAuthConfig();
+  const backendOrigin = storage.apiOrigin || storage.getConfiguredCloudOrigin() || window.location.origin;
+  const isFb = provider === 'facebook';
+  const callbackUrl = isFb
+    ? (oa.facebookCallbackUrl || `${backendOrigin}/api?action=oauth_facebook_callback`)
+    : (oa.googleCallbackUrl || `${backendOrigin}/api?action=oauth_google_callback`);
+  const jsOrigin = window.location.origin;
+
+  openModal(`
+    <div class="modal-head">
+      <h3>${isFb ? 'Liên Kết Đăng Nhập Facebook Trực Tiếp' : 'Liên Kết Tài Khoản Google (Gmail)'}</h3>
+      <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
+    </div>
+    <div style="font-size:13px;line-height:1.65;color:var(--ui-text);margin-bottom:14px;">
+      <p style="margin:0 0 10px;">
+        Tính năng <strong>${isFb ? 'Đăng nhập & Liên kết Facebook (OAuth 2.0)' : 'Đăng nhập & Liên kết Google (OAuth 2.0 / GIS)'}</strong> đã sẵn sàng trên hệ thống <strong>DaiLo Wedding</strong> và đang chờ Quản trị viên gắn khóa ứng dụng ${isFb ? 'Meta Developers' : 'Google Cloud'}.
+      </p>
+      <div style="background:var(--ui-surface-soft);border:1px solid var(--ui-border);border-radius:11px;padding:12px;font-size:12px;margin-bottom:12px;">
+        <div style="font-weight:700;color:var(--ui-brand);margin-bottom:6px;">Hướng dẫn kích hoạt trong 2 phút (Quản trị viên):</div>
+        ${isFb ? `
+          <div>1. Tạo ứng dụng tại <strong>developers.facebook.com</strong> → thêm sản phẩm <strong>Facebook Login</strong>.</div>
+          <div>2. Dán Callback URL này vào <em>Valid OAuth Redirect URIs</em>:</div>
+          <div class="link-box" style="margin:6px 0;">
+            <code>${escapeHtml(callbackUrl)}</code>
+            <button type="button" class="btn btn-outline btn-xs" id="btn-copy-oauth-cb">Sao chép</button>
+          </div>
+          <div>3. Thêm <code>FACEBOOK_APP_ID</code> &amp; <code>FACEBOOK_APP_SECRET</code> trong <strong>Render → Environment Variables</strong> (hoặc dán App ID tại Trang Quản Lý → Cài Đặt).</div>
+        ` : `
+          <div>1. Mở <strong>console.cloud.google.com</strong> → <em>APIs &amp; Services → Credentials → Create OAuth 2.0 Client ID (Web application)</em>.</div>
+          <div>2. Dán URL này vào <em>Authorized redirect URIs</em>:</div>
+          <div class="link-box" style="margin:6px 0;">
+            <code>${escapeHtml(callbackUrl)}</code>
+            <button type="button" class="btn btn-outline btn-xs" id="btn-copy-oauth-cb">Sao chép</button>
+          </div>
+          <div>3. Dán Origin này vào <em>Authorized JavaScript origins</em>:</div>
+          <div class="link-box" style="margin:6px 0;">
+            <code>${escapeHtml(jsOrigin)}</code>
+            <button type="button" class="btn btn-outline btn-xs" id="btn-copy-oauth-origin">Sao chép</button>
+          </div>
+          <div>4. Thêm <code>GOOGLE_CLIENT_ID</code> &amp; <code>GOOGLE_CLIENT_SECRET</code> trong <strong>Render → Environment Variables</strong> (hoặc dán Client ID tại Trang Quản Lý → Cài Đặt).</div>
+        `}
+      </div>
+    </div>
+    ${onBack
+      ? `<button type="button" class="btn btn-primary" style="width:100%;" id="btn-back-social-setup">Quay lại Đăng Nhập / Đăng Ký Bằng SĐT &amp; Gmail (OTP)</button>`
+      : `<button type="button" class="btn btn-primary" style="width:100%;" data-close-modal>Đã Hiểu</button>`}
+  `, { cardClass: 'auth-modal-card' });
+
+  modalRoot.querySelector('#btn-copy-oauth-cb')?.addEventListener('click', () => {
+    navigator.clipboard?.writeText(callbackUrl).then(() => showToast('Đã sao chép Callback URL!', 'success'));
+  });
+  modalRoot.querySelector('#btn-copy-oauth-origin')?.addEventListener('click', () => {
+    navigator.clipboard?.writeText(jsOrigin).then(() => showToast('Đã sao chép JavaScript Origin!', 'success'));
+  });
+  modalRoot.querySelector('#btn-back-social-setup')?.addEventListener('click', () => onBack?.());
+}
+
+async function runFacebookSocialFlow({ mode = 'login', onSuccess = null, onSetupNeeded = null } = {}) {
+  const oa = getOAuthConfig();
+  const returnTo = `${window.location.origin}${window.location.pathname}`;
+
+  if (mode === 'link') {
     if (storage.isCloudOnline() && oa.facebookServerOAuth) {
-      window.location.href = storage.apiUrl(`action=oauth_facebook_start&returnTo=${returnTo}`);
-      return;
+      try {
+        showToast('Đang chuyển hướng sang Facebook để liên kết tài khoản...', 'info');
+        const init = await storage.initSocialLink('facebook', returnTo);
+        if (init?.redirectUrl) {
+          window.location.href = init.redirectUrl;
+          return;
+        }
+      } catch (err) {
+        showToast(err.message || 'Không thể liên kết Facebook', 'error');
+        return;
+      }
     }
-    // 2. Direct Facebook JS SDK login if Facebook App ID is configured in Admin Settings
     if (storage.isCloudOnline() && oa.facebookAppId) {
       try {
-        showToast('Đang kết nối trực tiếp tới Facebook...', 'info');
+        showToast('Đang mở cửa sổ xác thực Facebook...', 'info');
         const FB = await loadFacebookSdk(oa.facebookAppId);
         FB.login(async resp => {
           if (!resp?.authResponse?.accessToken) {
-            showToast('Bạn đã hủy đăng nhập Facebook', 'info');
+            showToast('Bạn đã hủy liên kết Facebook', 'info');
             return;
           }
           try {
-            const user = await storage.loginWithFacebookToken(resp.authResponse.accessToken);
-            closeModal();
-            showToast(`Đăng nhập Facebook thành công! Chào mừng ${user.name}`, 'success');
-            if (onSuccessRedirect) onSuccessRedirect(user);
-            else route();
+            const user = await storage.linkSocialToken({ provider: 'facebook', accessToken: resp.authResponse.accessToken });
+            showToast('Đã liên kết tài khoản Facebook thành công!', 'success');
+            onSuccess?.(user);
           } catch (err) {
-            showToast(err.message || 'Không xác thực được phiên Facebook', 'error');
+            showToast(err.message || 'Không thể liên kết Facebook', 'error');
           }
         }, { scope: 'public_profile,email' });
       } catch (err) {
-        showToast(err.message || 'Không kết nối được tới Facebook', 'error');
+        showToast(err.message || 'Không kết nối được Facebook SDK', 'error');
       }
       return;
     }
-    // 3. Not configured with Meta App ID yet — show honest clear setup info & instant Gmail/Phone switch
-    oauthSetupInfo = 'facebook';
-    drawAuth();
-  };
+    onSetupNeeded ? onSetupNeeded() : openSocialSetupInfoModal('facebook');
+    return;
+  }
 
-  const handleDirectGoogle = () => {
-    const oa = getOAuth();
-    const returnTo = encodeURIComponent(`${window.location.origin}${window.location.pathname}`);
-    if (storage.isCloudOnline() && oa.googleConfigured) {
-      window.location.href = storage.apiUrl(`action=oauth_google_start&returnTo=${returnTo}`);
+  // Login flow
+  if (storage.isCloudOnline() && oa.facebookServerOAuth) {
+    window.location.href = storage.apiUrl(`action=oauth_facebook_start&returnTo=${encodeURIComponent(returnTo)}`);
+    return;
+  }
+  if (storage.isCloudOnline() && oa.facebookAppId) {
+    try {
+      showToast('Đang kết nối trực tiếp tới Facebook...', 'info');
+      const FB = await loadFacebookSdk(oa.facebookAppId);
+      FB.login(async resp => {
+        if (!resp?.authResponse?.accessToken) {
+          showToast('Bạn đã hủy đăng nhập Facebook', 'info');
+          return;
+        }
+        try {
+          const user = await storage.loginWithFacebookToken(resp.authResponse.accessToken);
+          closeModal();
+          showToast(`Đăng nhập Facebook thành công! Chào mừng ${user.name}`, 'success');
+          if (onSuccess) onSuccess(user);
+          else route();
+        } catch (err) {
+          showToast(err.message || 'Không xác thực được phiên Facebook', 'error');
+        }
+      }, { scope: 'public_profile,email' });
+    } catch (err) {
+      showToast(err.message || 'Không kết nối được tới Facebook', 'error');
+    }
+    return;
+  }
+  onSetupNeeded ? onSetupNeeded() : openSocialSetupInfoModal('facebook');
+}
+
+async function runGoogleSocialFlow({ mode = 'login', onSuccess = null, onSetupNeeded = null } = {}) {
+  const oa = getOAuthConfig();
+  const returnTo = `${window.location.origin}${window.location.pathname}`;
+
+  if (mode === 'link') {
+    if (storage.isCloudOnline() && oa.googleServerOAuth) {
+      try {
+        showToast('Đang chuyển hướng sang Google để liên kết tài khoản...', 'info');
+        const init = await storage.initSocialLink('google', returnTo);
+        if (init?.redirectUrl) {
+          window.location.href = init.redirectUrl;
+          return;
+        }
+      } catch (err) {
+        showToast(err.message || 'Không thể liên kết Google', 'error');
+        return;
+      }
+    }
+    if (storage.isCloudOnline() && oa.googleClientId) {
+      try {
+        showToast('Đang mở cửa sổ chọn tài khoản Google...', 'info');
+        const g = await loadGoogleGisSdk();
+        const client = g.accounts.oauth2.initTokenClient({
+          client_id: oa.googleClientId,
+          scope: 'openid email profile',
+          callback: async resp => {
+            if (resp?.error || !resp?.access_token) {
+              showToast('Bạn đã hủy liên kết Google', 'info');
+              return;
+            }
+            try {
+              const user = await storage.linkSocialToken({ provider: 'google', accessToken: resp.access_token });
+              showToast('Đã liên kết tài khoản Google thành công!', 'success');
+              onSuccess?.(user);
+            } catch (err) {
+              showToast(err.message || 'Không thể liên kết Google', 'error');
+            }
+          },
+          error_callback: err => {
+            const msg = err?.type === 'popup_failed_to_open'
+              ? 'Trình duyệt đang chặn cửa sổ bật lên Google. Vui lòng cho phép popup và thử lại.'
+              : 'Bạn đã đóng cửa sổ xác thực Google.';
+            showToast(msg, 'info');
+          },
+        });
+        client.requestAccessToken({ prompt: 'select_account' });
+      } catch (err) {
+        showToast(err.message || 'Không kết nối được Google Sign-In', 'error');
+      }
       return;
     }
-    // Switch cleanly into Gmail tab (strict @gmail.com + confirm Gmail)
-    activeTab = activeTab === 'register' ? 'register' : 'login';
-    loginMethod = 'gmail';
-    regProvider = 'gmail';
-    showToast('Nhập đúng địa chỉ Gmail thật (@gmail.com) của bạn bên dưới để tiếp tục', 'info');
-    drawAuth();
+    onSetupNeeded ? onSetupNeeded() : openSocialSetupInfoModal('google');
+    return;
+  }
+
+  // Login flow
+  if (storage.isCloudOnline() && oa.googleServerOAuth) {
+    window.location.href = storage.apiUrl(`action=oauth_google_start&returnTo=${encodeURIComponent(returnTo)}`);
+    return;
+  }
+  if (storage.isCloudOnline() && oa.googleClientId) {
+    try {
+      showToast('Đang mở cửa sổ đăng nhập Google...', 'info');
+      const g = await loadGoogleGisSdk();
+      const client = g.accounts.oauth2.initTokenClient({
+        client_id: oa.googleClientId,
+        scope: 'openid email profile',
+        callback: async resp => {
+          if (resp?.error || !resp?.access_token) {
+            showToast('Bạn đã hủy đăng nhập Google', 'info');
+            return;
+          }
+          try {
+            const user = await storage.loginWithGoogleToken({ accessToken: resp.access_token });
+            closeModal();
+            showToast(`Đăng nhập Google thành công! Chào mừng ${user.name}`, 'success');
+            if (onSuccess) onSuccess(user);
+            else route();
+          } catch (err) {
+            showToast(err.message || 'Không xác thực được phiên Google', 'error');
+          }
+        },
+        error_callback: err => {
+          const msg = err?.type === 'popup_failed_to_open'
+            ? 'Trình duyệt đang chặn cửa sổ bật lên Google. Vui lòng cho phép popup và thử lại.'
+            : 'Bạn đã đóng cửa sổ đăng nhập Google.';
+          showToast(msg, 'info');
+        },
+      });
+      client.requestAccessToken({ prompt: 'select_account' });
+    } catch (err) {
+      showToast(err.message || 'Không kết nối được Google Sign-In', 'error');
+    }
+    return;
+  }
+  onSetupNeeded ? onSetupNeeded() : openSocialSetupInfoModal('google');
+}
+
+function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
+  let activeTab = defaultTab; // 'login' | 'register'
+  let loginMethod = 'gmail'; // 'gmail' | 'phone'
+  let loginAuthMode = 'password'; // 'password' | 'otp'
+  let regProvider = 'phone'; // 'phone' | 'gmail'
+  let regTarget = '';
+  let regSentTarget = '';
+  let regOtpSent = false;
+  let regOtpDelivery = '';
+  let regPreviewCode = '';
+  let regOtpNotice = '';
+  let regOtpCodeDraft = '';
+  let regVerified = false;
+  let regVerificationToken = '';
+  let loginOtpTarget = '';
+  let loginSentTarget = '';
+  let loginOtpSent = false;
+  let regCooldownUntil = 0;
+  let loginCooldownUntil = 0;
+  let cooldownTimer = null;
+
+  const getRemainSec = scope => {
+    const until = scope === 'login' ? loginCooldownUntil : regCooldownUntil;
+    return Math.max(0, Math.ceil((until - Date.now()) / 1000));
+  };
+
+  const stopCooldownTimer = () => {
+    if (cooldownTimer) { clearInterval(cooldownTimer); cooldownTimer = null; }
+  };
+
+  const syncCooldownBtn = () => {
+    const btn = modalRoot.querySelector('[data-otp-send-btn]');
+    if (btn) {
+      const scope = btn.dataset.otpScope || 'register';
+      const remain = getRemainSec(scope);
+      const sent = scope === 'login' ? loginOtpSent : regOtpSent;
+      if (remain > 0) {
+        btn.disabled = true;
+        btn.textContent = `Gửi lại (${remain}s)`;
+      } else {
+        btn.disabled = false;
+        btn.textContent = sent ? 'Gửi lại mã' : (scope === 'login' ? 'Gửi mã OTP' : 'Gửi mã xác thực');
+      }
+    }
+    if (getRemainSec('register') <= 0 && getRemainSec('login') <= 0) {
+      stopCooldownTimer();
+    }
+  };
+
+  const ensureCooldownTick = () => {
+    if (cooldownTimer) return;
+    if (getRemainSec('register') <= 0 && getRemainSec('login') <= 0) return;
+    cooldownTimer = setInterval(syncCooldownBtn, 500);
+  };
+
+  const startCooldown = (scope, sec = 30) => {
+    const safeSec = Math.max(1, Number(sec) || 30);
+    const until = Date.now() + safeSec * 1000;
+    if (scope === 'login') loginCooldownUntil = until;
+    else regCooldownUntil = until;
+    syncCooldownBtn();
+    ensureCooldownTick();
+  };
+
+  const resetRegOtpState = () => {
+    regCooldownUntil = 0;
+    regSentTarget = '';
+    regOtpSent = false;
+    regOtpDelivery = '';
+    regPreviewCode = '';
+    regOtpNotice = '';
+    regOtpCodeDraft = '';
+    regVerified = false;
+    regVerificationToken = '';
+    syncCooldownBtn();
   };
 
   const drawAuth = () => {
-    const oa = getOAuth();
-    const backendOrigin = storage.apiOrigin || storage.getConfiguredCloudOrigin() || window.location.origin;
-    const fbCallback = oa.facebookCallbackUrl || `${backendOrigin}/api?action=oauth_facebook_callback`;
-
-    if (oauthSetupInfo === 'facebook') {
-      openModal(`
-        <div class="modal-head">
-          <h3>Liên Kết Đăng Nhập Facebook Trực Tiếp</h3>
-          <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
-        </div>
-        <div style="font-size:13px;line-height:1.6;color:var(--ui-text);margin-bottom:14px;">
-          <p style="margin:0 0 10px;">Tính năng <strong>Đăng nhập nhanh liên kết thẳng Facebook</strong> đã được lập trình sẵn (OAuth 2.0 trực tiếp tới <code>facebook.com</code>) và đang chờ Chủ Studio gắn <strong>Facebook App ID</strong>.</p>
-          <div style="background:var(--ui-surface-soft);border:1px solid var(--ui-border);border-radius:11px;padding:12px;font-size:12px;margin-bottom:12px;">
-            <div style="font-weight:700;color:var(--ui-brand);margin-bottom:6px;">Dành cho Chủ Studio (cài đặt 1 lần trong 2 phút):</div>
-            <div>1. Tạo ứng dụng miễn phí tại <strong>developers.facebook.com</strong> → thêm sản phẩm <strong>Facebook Login</strong>.</div>
-            <div>2. Dán đường dẫn Callback này vào mục <em>Valid OAuth Redirect URIs</em>:</div>
-            <div class="link-box" style="margin:6px 0;">
-              <code>${escapeHtml(fbCallback)}</code>
-              <button type="button" class="btn btn-outline btn-xs" id="btn-copy-fb-cb">Sao chép</button>
-            </div>
-            <div>3. Nhập <code>FACEBOOK_APP_ID</code> và <code>FACEBOOK_APP_SECRET</code> trong <strong>Render / Netlify → Environment Variables</strong> (hoặc dán App ID vào Trang Quản Lý → Cài Đặt).</div>
-          </div>
-        </div>
-        <button type="button" class="btn btn-primary" style="width:100%;margin-bottom:8px;" id="btn-back-auth">Đăng Nhập / Đăng Ký Nhanh Bằng Gmail hoặc SĐT</button>
-      `, { cardClass: 'auth-modal-card' });
-
-      modalRoot.querySelector('#btn-copy-fb-cb')?.addEventListener('click', () => {
-        navigator.clipboard?.writeText(fbCallback).then(() => showToast('Đã sao chép Callback URL Facebook!', 'success'));
-      });
-      modalRoot.querySelector('#btn-back-auth')?.addEventListener('click', () => { oauthSetupInfo = null; drawAuth(); });
-      return;
-    }
+    const oa = getOAuthConfig();
+    const canLoginOtp = loginMethod === 'gmail' ? Boolean(oa.otpLoginGmailEnabled) : Boolean(oa.otpLoginPhoneEnabled);
+    const regRemain = getRemainSec('register');
+    const loginRemain = getRemainSec('login');
 
     openModal(`
       <div class="modal-head" style="border:none;padding-bottom:4px;margin-bottom:8px;">
         <div>
-          <h3 style="font-family:'Philosopher',serif;font-size:22px;">Chào Mừng Bạn</h3>
-          <small style="color:var(--ui-muted);">Đăng nhập để quản lý thiệp cưới, lịch hẹn &amp; đơn hàng</small>
+          <h3 style="font-family:'Philosopher',serif;font-size:22px;">DaiLo Wedding</h3>
+          <small style="color:var(--ui-muted);">Đăng nhập, liên kết Facebook / Google hoặc đăng ký xác thực mã OTP</small>
         </div>
         <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
       </div>
 
       <div class="auth-seg-tabs">
         <button type="button" class="auth-seg-btn ${activeTab === 'login' ? 'active' : ''}" data-auth-tab="login">Đăng Nhập</button>
-        <button type="button" class="auth-seg-btn ${activeTab === 'register' ? 'active' : ''}" data-auth-tab="register">Đăng Ký Mới</button>
+        <button type="button" class="auth-seg-btn ${activeTab === 'register' ? 'active' : ''}" data-auth-tab="register">Đăng Ký Mới (OTP)</button>
       </div>
 
       <div class="social-auth-stack">
         <button type="button" class="social-auth-btn is-fb" data-social="facebook">
-          <strong style="font-size:16px;">f</strong>
-          <span>${oa.facebookConfigured ? 'Đăng nhập nhanh trực tiếp với Facebook' : 'Liên kết đăng nhập với Facebook'}</span>
+          ${FACEBOOK_ICON_SVG}
+          <span>${oa.facebookConfigured ? 'Tiếp tục trực tiếp với Facebook' : 'Đăng nhập / Liên kết Facebook'}</span>
         </button>
-        <button type="button" class="social-auth-btn" data-social="google">
-          <strong style="color:#db4437;font-size:15px;">G</strong>
-          <span>${oa.googleConfigured ? 'Tiếp tục trực tiếp với Gmail (Google)' : 'Đăng nhập / Đăng ký bằng Gmail thật'}</span>
+        <button type="button" class="social-auth-btn is-google" data-social="google">
+          ${GOOGLE_ICON_SVG}
+          <span>${oa.googleConfigured ? 'Tiếp tục trực tiếp với Google' : 'Đăng nhập / Liên kết Google'}</span>
         </button>
       </div>
 
-      <div class="auth-or-divider">hoặc dùng tài khoản trực tiếp</div>
+      <div class="auth-or-divider">hoặc dùng Số điện thoại / Gmail</div>
 
       ${activeTab === 'login' ? `
         <div class="auth-method-row">
           <button type="button" class="pill ${loginMethod === 'gmail' ? 'active' : ''}" data-login-method="gmail">Bằng Gmail</button>
           <button type="button" class="pill ${loginMethod === 'phone' ? 'active' : ''}" data-login-method="phone">Bằng Số điện thoại</button>
         </div>
-        <form id="auth-login-form">
-          ${loginMethod === 'phone' ? `
+
+        <div class="auth-submode-row">
+          <button type="button" class="auth-submode-btn ${loginAuthMode === 'password' ? 'active' : ''}" data-login-auth-mode="password">Dùng Mật khẩu</button>
+          <button type="button" class="auth-submode-btn ${loginAuthMode === 'otp' ? 'active' : ''}" data-login-auth-mode="otp">Dùng Mã OTP gửi về</button>
+        </div>
+
+        ${loginAuthMode === 'password' ? `
+          <form id="auth-login-form">
+            ${loginMethod === 'phone' ? `
+              <div class="form-group">
+                <label>Số điện thoại (bắt buộc đúng 10 chữ số) *</label>
+                <input class="input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone name="identifier" required placeholder="VD: 0912345678" autocomplete="tel" />
+              </div>
+            ` : `
+              <div class="form-group">
+                <label>Đúng địa chỉ Gmail đã đăng ký (@gmail.com) *</label>
+                <input class="input" type="email" name="identifier" required placeholder="tenban@gmail.com" autocomplete="email" />
+              </div>
+            `}
             <div class="form-group">
-              <label>Số điện thoại (bắt buộc đúng 10 chữ số) *</label>
-              <input class="input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone name="identifier" required placeholder="VD: 0912345678" autocomplete="tel" />
+              <label>Mật khẩu *</label>
+              <input class="input" type="password" name="password" required placeholder="Nhập mật khẩu..." autocomplete="current-password" />
             </div>
-          ` : `
-            <div class="form-group">
-              <label>Đúng địa chỉ Gmail đã đăng ký (@gmail.com) *</label>
-              <input class="input" type="email" name="identifier" required placeholder="tenban@gmail.com" autocomplete="email" />
-            </div>
-          `}
-          <div class="form-group">
-            <label>Mật khẩu *</label>
-            <input class="input" type="password" name="password" required placeholder="Nhập mật khẩu..." autocomplete="current-password" />
+            <button type="submit" class="btn btn-primary" style="width:100%;">Đăng Nhập</button>
+          </form>
+        ` : !canLoginOtp ? `
+          <div class="otp-info-box">
+            <div style="font-weight:700;color:var(--ui-brand);margin-bottom:4px;">Đăng nhập không mật khẩu bằng OTP</div>
+            <p style="margin:0 0 10px;font-size:12px;color:var(--ui-muted);line-height:1.55;">
+              Để bảo vệ tài khoản của bạn, đăng nhập trực tiếp bằng mã OTP chỉ mở khi máy chủ đã kết nối dịch vụ gửi ${loginMethod === 'gmail' ? 'Email thật (Resend / Brevo)' : 'SMS thật (eSMS / Twilio)'}. Vui lòng đăng nhập bằng <strong>Mật khẩu</strong> hoặc tài khoản <strong>Facebook / Google</strong> đã liên kết.
+            </p>
+            <button type="button" class="btn btn-primary btn-sm" style="width:100%;" data-login-auth-mode="password">Chuyển sang Đăng Nhập Bằng Mật Khẩu</button>
           </div>
-          <button type="submit" class="btn btn-primary" style="width:100%;">Đăng Nhập</button>
-        </form>
+        ` : `
+          <form id="auth-login-otp-form">
+            <div class="form-group">
+              <label>${loginMethod === 'phone' ? 'Số điện thoại đã đăng ký (10 số) *' : 'Địa chỉ Gmail đã đăng ký (@gmail.com) *'}</label>
+              <div style="display:flex;gap:8px;">
+                ${loginMethod === 'phone'
+                  ? `<input class="input" id="login-otp-target" type="tel" inputmode="numeric" maxlength="10" data-numeric-phone name="identifier" required value="${escapeHtml(loginOtpTarget)}" placeholder="VD: 0912345678" style="flex:1;" />`
+                  : `<input class="input" id="login-otp-target" type="email" name="identifier" required value="${escapeHtml(loginOtpTarget)}" placeholder="tenban@gmail.com" style="flex:1;" />`}
+                <button type="button" class="btn btn-outline btn-sm" id="btn-send-login-otp" data-otp-send-btn data-otp-scope="login" style="flex-shrink:0;" ${loginRemain > 0 ? 'disabled' : ''}>
+                  ${loginRemain > 0 ? `Gửi lại (${loginRemain}s)` : (loginOtpSent ? 'Gửi lại mã' : 'Gửi mã OTP')}
+                </button>
+              </div>
+            </div>
+            <div id="login-otp-sent-area">
+              ${loginOtpSent ? `
+                <div class="otp-info-box is-success" style="margin-bottom:12px;">
+                  Đã gửi mã đăng nhập 6 số về ${loginMethod === 'phone' ? 'SMS số ' : 'hộp thư Gmail '}<strong>${escapeHtml(loginSentTarget)}</strong> (hiệu lực 5 phút).
+                </div>
+                <div class="form-group">
+                  <label>Nhập mã OTP 6 số vừa nhận *</label>
+                  <input class="input otp-code-input" id="login-otp-code-input" type="tel" inputmode="numeric" maxlength="6" name="otpCode" required placeholder="______" autocomplete="one-time-code" />
+                </div>
+                <button type="submit" class="btn btn-primary" style="width:100%;">Xác Nhận &amp; Đăng Nhập</button>
+              ` : `
+                <p style="font-size:12px;color:var(--ui-muted);margin:0;">Bấm <strong>Gửi mã OTP</strong> để nhận mã xác thực 6 số gửi về ${loginMethod === 'phone' ? 'điện thoại' : 'Gmail'} của bạn.</p>
+              `}
+            </div>
+          </form>
+        `}
       ` : `
         <div class="auth-method-row">
-          <button type="button" class="pill ${regProvider === 'gmail' ? 'active' : ''}" data-reg-prov="gmail">Bằng Gmail thật</button>
           <button type="button" class="pill ${regProvider === 'phone' ? 'active' : ''}" data-reg-prov="phone">Bằng Số điện thoại</button>
+          <button type="button" class="pill ${regProvider === 'gmail' ? 'active' : ''}" data-reg-prov="gmail">Bằng Gmail thật</button>
         </div>
-        <form id="auth-register-form">
-          <div class="form-group"><label>Họ và tên *</label><input class="input" name="name" required placeholder="VD: Nguyễn Bảo Ngọc" autocomplete="name" /></div>
-          ${regProvider === 'gmail' ? `
+
+        <div class="otp-steps-bar">
+          <span class="otp-step-pill ${!regVerified ? 'active' : 'done'}">1. Gửi &amp; xác nhận mã 6 số</span>
+          <span style="color:var(--ui-muted);">→</span>
+          <span class="otp-step-pill ${regVerified ? 'active' : ''}">2. Hoàn tất đăng ký</span>
+        </div>
+
+        ${!regVerified ? `
+          <div id="reg-otp-step1">
             <div class="form-group">
-              <label>Địa chỉ Gmail thật bạn đã tạo (@gmail.com) *</label>
-              <input class="input" type="email" id="reg-gmail-input" name="email" required placeholder="tenban@gmail.com" autocomplete="email" />
-            </div>
-            <div class="form-group">
-              <label>Nhập lại đúng Gmail vừa nhập để xác nhận *</label>
-              <input class="input" type="email" name="confirmEmail" required placeholder="Nhập lại tenban@gmail.com" autocomplete="email" />
-            </div>
-            ${oa.gmailOtpEnabled ? `
-              <div class="form-group">
-                <label>Mã xác thực 6 số gửi về Gmail *</label>
-                <div style="display:flex;gap:8px;">
-                  <input class="input" type="tel" inputmode="numeric" maxlength="6" name="otpCode" required placeholder="Nhập 6 số..." style="flex:1;" />
-                  <button type="button" class="btn btn-outline btn-sm" id="btn-send-gmail-otp" style="flex-shrink:0;">${otpSentForEmail ? 'Gửi lại mã' : 'Gửi mã OTP'}</button>
-                </div>
+              <label>${regProvider === 'phone' ? 'Số điện thoại nhận mã xác thực (bắt buộc đúng 10 số) *' : 'Địa chỉ Gmail thật nhận mã xác thực (@gmail.com) *'}</label>
+              <div style="display:flex;gap:8px;">
+                ${regProvider === 'phone'
+                  ? `<input class="input" id="reg-otp-target" type="tel" inputmode="numeric" maxlength="10" data-numeric-phone value="${escapeHtml(regTarget)}" placeholder="VD: 0912345678" autocomplete="tel" style="flex:1;" />`
+                  : `<input class="input" id="reg-otp-target" type="email" value="${escapeHtml(regTarget)}" placeholder="tenban@gmail.com" autocomplete="email" style="flex:1;" />`}
+                <button type="button" class="btn btn-primary btn-sm" id="btn-send-reg-otp" data-otp-send-btn data-otp-scope="register" style="flex-shrink:0;" ${regRemain > 0 ? 'disabled' : ''}>
+                  ${regRemain > 0 ? `Gửi lại (${regRemain}s)` : (regOtpSent ? 'Gửi lại mã' : 'Gửi mã xác thực')}
+                </button>
               </div>
-            ` : ''}
-            <div class="form-group"><label>Số điện thoại / Zalo (10 chữ số)</label><input class="input" type="tel" inputmode="numeric" maxlength="10" data-numeric-phone name="phone" placeholder="VD: 0912345678" autocomplete="tel" /></div>
-          ` : `
-            <div class="form-group"><label>Số điện thoại (bắt buộc đúng 10 chữ số) *</label><input class="input" type="tel" inputmode="numeric" pattern="0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9[0-9])[0-9]{7}" maxlength="10" data-numeric-phone name="phone" required placeholder="VD: 0912345678" autocomplete="tel" /></div>
-            <div class="form-group"><label>Gmail đã tạo (tùy chọn — đúng @gmail.com)</label><input class="input" type="email" name="email" placeholder="tenban@gmail.com" autocomplete="email" /></div>
-          `}
-          <div class="form-group"><label>Mật khẩu (tối thiểu 6 ký tự) *</label><input class="input" type="password" name="password" required minlength="6" placeholder="Tạo mật khẩu..." autocomplete="new-password" /></div>
-          <button type="submit" class="btn btn-primary" style="width:100%;">Tạo Tài Khoản Khách Hàng</button>
-        </form>
+              <small style="display:block;margin-top:5px;font-size:11.5px;color:var(--ui-muted);">
+                Bắt buộc nhận và xác minh mã 6 số trước khi tạo tài khoản mới tại DaiLo Wedding.
+              </small>
+            </div>
+
+            <div id="reg-otp-sent-area">
+              ${regOtpSent ? `
+                ${regOtpDelivery === 'on_screen_fallback' && regPreviewCode ? `
+                  <div class="otp-preview-card">
+                    <div style="font-size:11.5px;font-weight:700;color:#7b4f10;text-transform:uppercase;letter-spacing:0.6px;">Mã xác thực 6 số cho ${escapeHtml(regSentTarget)}</div>
+                    <div class="otp-preview-code">${escapeHtml(regPreviewCode)}</div>
+                    <div style="font-size:11.5px;color:#6e5630;line-height:1.45;">${escapeHtml(regOtpNotice || 'Nhập đúng 6 số trên vào ô bên dưới để xác nhận (hiệu lực 5 phút).')}</div>
+                  </div>
+                ` : `
+                  <div class="otp-info-box is-success" style="margin-bottom:12px;">
+                    Đã gửi mã xác thực 6 số về ${regProvider === 'phone' ? 'SMS số điện thoại ' : 'hộp thư Gmail '}<strong>${escapeHtml(regSentTarget)}</strong>. Vui lòng kiểm tra và nhập mã bên dưới (hiệu lực 5 phút).
+                  </div>
+                `}
+
+                <div class="form-group">
+                  <label>Nhập mã xác thực 6 số *</label>
+                  <input class="input otp-code-input" id="reg-otp-code-input" type="tel" inputmode="numeric" maxlength="6" value="${escapeHtml(regOtpCodeDraft)}" placeholder="Nhập 6 chữ số..." autocomplete="one-time-code" />
+                </div>
+                <button type="button" class="btn btn-primary" id="btn-verify-reg-otp" style="width:100%;">Xác Nhận Mã Để Tiếp Tục Đăng Ký</button>
+              ` : `
+                <div class="otp-info-box" style="font-size:12px;color:var(--ui-muted);line-height:1.55;">
+                  Nhập ${regProvider === 'phone' ? 'số điện thoại 10 số Việt Nam' : 'địa chỉ Gmail (@gmail.com)'} rồi bấm <strong>Gửi mã xác thực</strong>. Sau khi xác nhận mã 6 số, bạn sẽ đặt mật khẩu và hoàn tất đăng ký.
+                </div>
+              `}
+            </div>
+          </div>
+        ` : `
+          <div class="otp-verified-banner">
+            <div>
+              <strong>${icon('shield', 14)} Đã xác thực ${regProvider === 'phone' ? 'Số điện thoại' : 'Gmail'}</strong>
+              <div style="font-size:12.5px;margin-top:2px;">${escapeHtml(regTarget)}</div>
+            </div>
+            <button type="button" class="btn btn-outline btn-xs" id="btn-change-reg-target">Đổi</button>
+          </div>
+
+          <form id="auth-register-form">
+            <div class="form-group"><label>Họ và tên *</label><input class="input" name="name" required placeholder="VD: Nguyễn Bảo Ngọc" autocomplete="name" /></div>
+            ${regProvider === 'phone' ? `
+              <div class="form-group"><label>Gmail bổ sung (tùy chọn — đúng @gmail.com)</label><input class="input" type="email" name="email" placeholder="tenban@gmail.com" autocomplete="email" /></div>
+            ` : `
+              <div class="form-group"><label>Số điện thoại / Zalo bổ sung (tùy chọn — 10 số)</label><input class="input" type="tel" inputmode="numeric" maxlength="10" data-numeric-phone name="phone" placeholder="VD: 0912345678" autocomplete="tel" /></div>
+            `}
+            <div class="form-group"><label>Tạo mật khẩu (tối thiểu 6 ký tự) *</label><input class="input" type="password" name="password" required minlength="6" placeholder="Tạo mật khẩu..." autocomplete="new-password" /></div>
+            <button type="submit" class="btn btn-primary" style="width:100%;">Hoàn Tất Đăng Ký Tài Khoản</button>
+          </form>
+        `}
       `}
-    `, { cardClass: 'auth-modal-card' });
+    `, { cardClass: 'auth-modal-card', preserveCleanup: true });
 
+    activeModalCleanup = stopCooldownTimer;
+    ensureCooldownTick();
     bindNumericPhoneInputs(modalRoot);
-    modalRoot.querySelectorAll('[data-auth-tab]').forEach(b => b.addEventListener('click', () => { activeTab = b.dataset.authTab; drawAuth(); }));
-    modalRoot.querySelectorAll('[data-login-method]').forEach(b => b.addEventListener('click', () => { loginMethod = b.dataset.loginMethod; drawAuth(); }));
-    modalRoot.querySelectorAll('[data-reg-prov]').forEach(b => b.addEventListener('click', () => { regProvider = b.dataset.regProv; drawAuth(); }));
-    modalRoot.querySelector('[data-social="facebook"]')?.addEventListener('click', () => handleDirectFacebook());
-    modalRoot.querySelector('[data-social="google"]')?.addEventListener('click', () => handleDirectGoogle());
 
-    modalRoot.querySelector('#btn-send-gmail-otp')?.addEventListener('click', async e => {
-      const emailVal = (modalRoot.querySelector('#reg-gmail-input')?.value || '').trim().toLowerCase();
-      if (!isStrictGmail(emailVal)) {
-        showToast('Vui lòng nhập đúng địa chỉ Gmail thật (kết thúc bằng @gmail.com) trước khi gửi mã', 'error');
-        return;
+    modalRoot.querySelectorAll('[data-auth-tab]').forEach(b => b.addEventListener('click', () => {
+      activeTab = b.dataset.authTab;
+      drawAuth();
+    }));
+    modalRoot.querySelectorAll('[data-login-method]').forEach(b => b.addEventListener('click', () => {
+      if (loginMethod !== b.dataset.loginMethod) {
+        loginMethod = b.dataset.loginMethod;
+        loginOtpSent = false;
+        loginOtpTarget = '';
+        loginSentTarget = '';
+        loginCooldownUntil = 0;
+      }
+      drawAuth();
+    }));
+    modalRoot.querySelectorAll('[data-login-auth-mode]').forEach(b => b.addEventListener('click', () => {
+      loginAuthMode = b.dataset.loginAuthMode;
+      drawAuth();
+    }));
+    modalRoot.querySelectorAll('[data-reg-prov]').forEach(b => b.addEventListener('click', () => {
+      if (regProvider !== b.dataset.regProv) {
+        regProvider = b.dataset.regProv;
+        regTarget = '';
+        resetRegOtpState();
+      }
+      drawAuth();
+    }));
+
+    modalRoot.querySelector('[data-social="facebook"]')?.addEventListener('click', () => {
+      runFacebookSocialFlow({
+        mode: 'login',
+        onSuccess: onSuccessRedirect,
+        onSetupNeeded: () => openSocialSetupInfoModal('facebook', { onBack: drawAuth }),
+      });
+    });
+    modalRoot.querySelector('[data-social="google"]')?.addEventListener('click', () => {
+      runGoogleSocialFlow({
+        mode: 'login',
+        onSuccess: onSuccessRedirect,
+        onSetupNeeded: () => openSocialSetupInfoModal('google', { onBack: drawAuth }),
+      });
+    });
+
+    // Step 1 Register OTP: target input (changing target after OTP sent invalidates stale OTP immediately!)
+    modalRoot.querySelector('#reg-otp-target')?.addEventListener('input', e => {
+      regTarget = regProvider === 'phone' ? sanitizePhoneDigits(e.target.value) : e.target.value.trim().toLowerCase();
+      if (regProvider === 'phone' && e.target.value !== regTarget) e.target.value = regTarget;
+      if (regOtpSent && regTarget !== regSentTarget) {
+        resetRegOtpState();
+        const area = modalRoot.querySelector('#reg-otp-sent-area');
+        if (area) {
+          area.innerHTML = `<div class="otp-info-box" style="font-size:12px;color:var(--ui-muted);line-height:1.55;">Bạn vừa thay đổi ${regProvider === 'phone' ? 'số điện thoại' : 'Gmail'}. Vui lòng bấm <strong>Gửi mã xác thực</strong> để nhận mã mới.</div>`;
+        }
+      }
+    });
+    modalRoot.querySelector('#reg-otp-target')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        modalRoot.querySelector('#btn-send-reg-otp')?.click();
+      }
+    });
+    modalRoot.querySelector('#reg-otp-code-input')?.addEventListener('input', e => {
+      regOtpCodeDraft = e.target.value.replace(/\D/g, '').slice(0, 6);
+      if (e.target.value !== regOtpCodeDraft) e.target.value = regOtpCodeDraft;
+    });
+    modalRoot.querySelector('#reg-otp-code-input')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        modalRoot.querySelector('#btn-verify-reg-otp')?.click();
+      }
+    });
+
+    modalRoot.querySelector('#btn-send-reg-otp')?.addEventListener('click', async e => {
+      const targetInp = modalRoot.querySelector('#reg-otp-target');
+      const rawVal = (targetInp?.value || '').trim();
+      if (regProvider === 'phone') {
+        const ck = validateVnPhone10(rawVal);
+        if (!ck.ok) { showToast(ck.error, 'error'); targetInp?.focus(); return; }
+        regTarget = ck.digits;
+      } else {
+        const lower = rawVal.toLowerCase();
+        if (!isStrictGmail(lower)) {
+          showToast('Vui lòng nhập đúng địa chỉ Gmail thật (@gmail.com) trước khi gửi mã', 'error');
+          targetInp?.focus();
+          return;
+        }
+        regTarget = lower;
       }
       const btn = e.currentTarget;
       btn.disabled = true;
       btn.textContent = 'Đang gửi...';
       try {
-        await storage.sendGmailOtp(emailVal);
-        otpSentForEmail = emailVal;
-        showToast(`Đã gửi mã xác thực 6 số về hộp thư ${emailVal}!`, 'success');
-        btn.textContent = 'Đã gửi mã';
+        const res = await storage.sendOtp({ channel: regProvider, target: regTarget, purpose: 'register' });
+        regOtpSent = true;
+        regSentTarget = regTarget;
+        regOtpDelivery = res.delivery || '';
+        regPreviewCode = res.previewCode || '';
+        regOtpNotice = res.notice || '';
+        regOtpCodeDraft = '';
+        startCooldown('register', res.cooldownSec || 30);
+        showToast(
+          res.delivery === 'on_screen_fallback'
+            ? `Đã tạo mã xác thực 6 số cho ${regTarget}. Vui lòng nhập mã hiển thị bên dưới!`
+            : `Đã gửi mã xác thực 6 số về ${regProvider === 'phone' ? 'SĐT' : 'Gmail'} ${regTarget}!`,
+          'success'
+        );
+        drawAuth();
+        modalRoot.querySelector('#reg-otp-code-input')?.focus();
       } catch (err) {
-        showToast(err.message || 'Không gửi được mã xác thực Gmail', 'error');
-        btn.textContent = 'Gửi mã OTP';
-      } finally {
-        btn.disabled = false;
+        showToast(err.message || 'Không gửi được mã xác thực', 'error');
+        if (err?.retryAfterSec) {
+          startCooldown('register', err.retryAfterSec);
+        } else {
+          btn.disabled = false;
+          btn.textContent = regOtpSent ? 'Gửi lại mã' : 'Gửi mã xác thực';
+        }
       }
     });
 
+    // Step 1 Register OTP: verify 6-digit code
+    modalRoot.querySelector('#btn-verify-reg-otp')?.addEventListener('click', async e => {
+      const codeInp = modalRoot.querySelector('#reg-otp-code-input');
+      const codeVal = (codeInp?.value || '').replace(/\D/g, '').slice(0, 6);
+      if (!regOtpSent || !regSentTarget || regTarget !== regSentTarget) {
+        showToast('Vui lòng bấm Gửi mã xác thực cho đúng SĐT/Gmail hiện tại trước.', 'error');
+        return;
+      }
+      if (codeVal.length !== 6) {
+        showToast('Vui lòng nhập đủ 6 chữ số mã xác thực', 'error');
+        codeInp?.focus();
+        return;
+      }
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Đang xác minh...';
+      try {
+        const res = await storage.verifyOtp({ channel: regProvider, target: regSentTarget, code: codeVal, purpose: 'register' });
+        regVerified = true;
+        regTarget = regSentTarget;
+        regVerificationToken = res.verificationToken || '';
+        regOtpCodeDraft = codeVal;
+        regCooldownUntil = 0;
+        syncCooldownBtn();
+        showToast(`Xác thực ${regProvider === 'phone' ? 'Số điện thoại' : 'Gmail'} thành công! Hãy tạo mật khẩu để hoàn tất.`, 'success');
+        drawAuth();
+      } catch (err) {
+        showToast(err.message || 'Mã xác thực 6 số không đúng', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Xác Nhận Mã Để Tiếp Tục Đăng Ký';
+      }
+    });
+
+    modalRoot.querySelector('#btn-change-reg-target')?.addEventListener('click', () => {
+      resetRegOtpState();
+      drawAuth();
+    });
+
+    // Login with Password
     modalRoot.querySelector('#auth-login-form')?.addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
@@ -513,48 +997,118 @@ function openAuthModal(defaultTab = 'login', onSuccessRedirect = null) {
       }
     });
 
+    // Login with Live OTP
+    modalRoot.querySelector('#login-otp-target')?.addEventListener('input', e => {
+      loginOtpTarget = loginMethod === 'phone' ? sanitizePhoneDigits(e.target.value) : e.target.value.trim().toLowerCase();
+      if (loginMethod === 'phone' && e.target.value !== loginOtpTarget) e.target.value = loginOtpTarget;
+      if (loginOtpSent && loginOtpTarget !== loginSentTarget) {
+        loginOtpSent = false;
+        loginSentTarget = '';
+        loginCooldownUntil = 0;
+        syncCooldownBtn();
+        const area = modalRoot.querySelector('#login-otp-sent-area');
+        if (area) {
+          area.innerHTML = `<p style="font-size:12px;color:var(--ui-muted);margin:0;">Bạn vừa thay đổi ${loginMethod === 'phone' ? 'số điện thoại' : 'Gmail'}. Vui lòng bấm <strong>Gửi mã OTP</strong> để nhận mã mới.</p>`;
+        }
+      }
+    });
+    modalRoot.querySelector('#login-otp-code-input')?.addEventListener('input', e => {
+      const clean = e.target.value.replace(/\D/g, '').slice(0, 6);
+      if (e.target.value !== clean) e.target.value = clean;
+    });
+
+    modalRoot.querySelector('#btn-send-login-otp')?.addEventListener('click', async e => {
+      const targetInp = modalRoot.querySelector('#login-otp-target');
+      const rawVal = (targetInp?.value || '').trim();
+      if (loginMethod === 'phone') {
+        const ck = validateVnPhone10(rawVal);
+        if (!ck.ok) { showToast(ck.error, 'error'); targetInp?.focus(); return; }
+        loginOtpTarget = ck.digits;
+      } else {
+        const lower = rawVal.toLowerCase();
+        if (!isStrictGmail(lower)) { showToast('Vui lòng nhập đúng địa chỉ Gmail (@gmail.com)', 'error'); targetInp?.focus(); return; }
+        loginOtpTarget = lower;
+      }
+      const btn = e.currentTarget;
+      btn.disabled = true;
+      btn.textContent = 'Đang gửi...';
+      try {
+        const res = await storage.sendOtp({ channel: loginMethod, target: loginOtpTarget, purpose: 'login' });
+        loginOtpSent = true;
+        loginSentTarget = loginOtpTarget;
+        startCooldown('login', res.cooldownSec || 30);
+        showToast(`Đã gửi mã đăng nhập 6 số về ${loginOtpTarget}!`, 'success');
+        drawAuth();
+        modalRoot.querySelector('#login-otp-code-input')?.focus();
+      } catch (err) {
+        showToast(err.message || 'Không gửi được mã đăng nhập', 'error');
+        if (err?.retryAfterSec) {
+          startCooldown('login', err.retryAfterSec);
+        } else {
+          btn.disabled = false;
+          btn.textContent = loginOtpSent ? 'Gửi lại mã' : 'Gửi mã OTP';
+        }
+      }
+    });
+
+    modalRoot.querySelector('#auth-login-otp-form')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (!loginOtpSent || !loginSentTarget || loginOtpTarget !== loginSentTarget) {
+        showToast('Vui lòng bấm Gửi mã OTP cho đúng tài khoản hiện tại.', 'error');
+        return;
+      }
+      const fd = new FormData(e.target);
+      const code = (fd.get('otpCode') || '').toString().replace(/\D/g, '').slice(0, 6);
+      if (code.length !== 6) { showToast('Vui lòng nhập đủ 6 chữ số mã OTP', 'error'); return; }
+      try {
+        const user = await storage.loginWithOtp({
+          channel: loginMethod,
+          identifier: loginSentTarget,
+          otpCode: code,
+        });
+        closeModal();
+        showToast(`Đăng nhập thành công! Chào mừng ${user.name}`, 'success');
+        if (onSuccessRedirect) onSuccessRedirect(user);
+        else route();
+      } catch (err) {
+        showToast(err.message || 'Mã OTP đăng nhập không đúng', 'error');
+      }
+    });
+
+    // Step 2 Register Submit (after OTP verified!)
     modalRoot.querySelector('#auth-register-form')?.addEventListener('submit', async e => {
       e.preventDefault();
       const fd = new FormData(e.target);
-      const rawEmail = (fd.get('email') || '').toString().trim().toLowerCase();
-      const rawConfirm = (fd.get('confirmEmail') || '').toString().trim().toLowerCase();
-      const rawPhone = (fd.get('phone') || '').toString().trim();
-      const otpCode = (fd.get('otpCode') || '').toString().trim();
+      const name = fd.get('name').toString().trim();
+      const extraEmail = (fd.get('email') || '').toString().trim().toLowerCase();
+      const extraPhone = (fd.get('phone') || '').toString().trim();
+      const password = fd.get('password').toString();
 
-      if (regProvider === 'gmail') {
-        if (!isStrictGmail(rawEmail)) {
-          showToast('Đăng ký bằng Gmail bắt buộc nhập đúng Gmail thật (định dạng tenban@gmail.com)', 'error');
-          return;
-        }
-        if (rawConfirm !== rawEmail) {
-          showToast('Gmail nhập lại chưa khớp! Vui lòng nhập đúng Gmail bạn đã tạo', 'error');
-          return;
-        }
-      }
-      if (regProvider === 'phone' && !isValidPhoneDigits(rawPhone)) {
-        showToast(getPhoneErrorMsg(rawPhone), 'error');
-        return;
-      }
-      if (regProvider === 'phone' && rawEmail && !isStrictGmail(rawEmail)) {
+      const finalEmail = regProvider === 'gmail' ? regTarget : extraEmail;
+      const finalPhone = regProvider === 'phone' ? regTarget : sanitizePhoneDigits(extraPhone);
+
+      if (!name) { showToast('Vui lòng nhập họ và tên', 'error'); return; }
+      if (regProvider === 'phone' && extraEmail && !isStrictGmail(extraEmail)) {
         showToast('Gmail bổ sung phải đúng định dạng @gmail.com', 'error');
         return;
       }
-      if (rawPhone && !isValidPhoneDigits(rawPhone)) {
-        showToast(getPhoneErrorMsg(rawPhone), 'error');
+      if (regProvider === 'gmail' && extraPhone && !isValidPhoneDigits(extraPhone)) {
+        showToast(getPhoneErrorMsg(extraPhone), 'error');
         return;
       }
       try {
         const user = await storage.authRegister({
           provider: regProvider,
-          name: fd.get('name').toString().trim(),
-          email: rawEmail,
-          confirmEmail: rawConfirm,
-          phone: sanitizePhoneDigits(rawPhone),
-          password: fd.get('password').toString(),
-          otpCode,
+          name,
+          email: finalEmail,
+          confirmEmail: finalEmail,
+          phone: finalPhone,
+          password,
+          otpCode: regOtpCodeDraft,
+          otpVerificationToken: regVerificationToken,
         });
         closeModal();
-        showToast(`Đăng ký thành công! Chào mừng ${user.name}`, 'success');
+        showToast(`Đăng ký thành công! Chào mừng ${user.name} đến với DaiLo Wedding`, 'success');
         if (onSuccessRedirect) onSuccessRedirect(user);
         else route();
       } catch (err) {
@@ -1093,7 +1647,7 @@ function renderPosterCardVisual(t, blankMode, idx) {
 
   const photoEl = blankMode
     ? `<div style="width:100%;height:100%;background:rgba(255,252,247,0.84);backdrop-filter:blur(4px);display:flex;flex-direction:column;align-items:center;justify-content:center;color:${d.primaryColor};border:1px solid ${d.ornamentColor}55;padding:10px;">
-         <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:12.5px;color:${d.ornamentColor};">Atelier</span>
+         <span style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:12.5px;color:${d.ornamentColor};">DaiLo</span>
          <span style="font-size:8.5px;letter-spacing:1.4px;margin-top:4px;text-transform:uppercase;font-weight:600;">Khung Ảnh 3:4</span>
        </div>`
     : `<img src="${sampleImg}" alt="${escapeHtml(t.name)}" loading="lazy" />`;
@@ -1193,12 +1747,13 @@ async function renderShowroom(initialBlank = true) {
     });
     const quickQrUrl = buildOwnerVietQrUrl(settings, (settings.packages?.[1]?.price || 189000), 'DAT THIEP CUOI');
 
+    document.title = `${settings.brandName || 'DaiLo Wedding'} — Thiết Kế Thiệp Cưới Online Cao Cấp`;
     appRoot.innerHTML = `
       <header class="top-nav">
         <div class="brand-mark" data-go-store>
-          <div class="brand-monogram">L</div>
+          <div class="brand-monogram">DL</div>
           <div>
-            <div class="brand-script-name">${escapeHtml(settings.brandName || "L'Amour Atelier")}</div>
+            <div class="brand-script-name">${escapeHtml(settings.brandName || 'DaiLo Wedding')}</div>
             <div class="brand-sub-status">
               <span class="status-dot ${storage.isCloudOnline() ? 'online' : 'local'}"></span>
               <span>Hotline / Zalo: ${escapeHtml(hotline)}</span>
@@ -1459,7 +2014,7 @@ function openTemplatePreviewModal(demoInv, tplName, tplId, initialBlank, setting
 
   const host = modalRoot.querySelector('#modal-inv-host');
   const renderer = new InvitationRenderer(host, {
-    inPreview: true, blankMode: isBlank, skipIntro: false, brandName: settings.brandName || "L'Amour Atelier", onToast: showToast,
+    inPreview: true, blankMode: isBlank, skipIntro: false, brandName: settings.brandName || 'DaiLo Wedding', onToast: showToast,
   });
   renderer.render(demoInv);
   const destroyPreview = () => { renderer.destroy(); musicEngine.stop(); };
@@ -1515,12 +2070,15 @@ async function renderCustomerAccountView() {
 
   const u = data.user;
   const liveTemplates = getLiveTemplates();
+  const hasFb = Boolean(u.facebookId);
+  const hasGoogle = Boolean(u.googleId);
+  document.title = `Tài Khoản — ${settings.brandName || 'DaiLo Wedding'}`;
   appRoot.innerHTML = `
     <header class="top-nav">
       <div class="brand-mark" data-go-store>
-        <div class="brand-monogram">L</div>
+        <div class="brand-monogram">DL</div>
         <div>
-          <div class="brand-script-name">${escapeHtml(settings.brandName || "L'Amour Atelier")}</div>
+          <div class="brand-script-name">${escapeHtml(settings.brandName || 'DaiLo Wedding')}</div>
           <div class="brand-sub-status"><span>Tài Khoản Khách Hàng • ${escapeHtml(u.email || u.phone || u.name)}</span></div>
         </div>
       </div>
@@ -1535,7 +2093,11 @@ async function renderCustomerAccountView() {
       <div class="panel-card" style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
         <div>
           <h2 style="margin:0 0 4px;font-family:'Philosopher',serif;font-size:24px;">Xin chào, ${escapeHtml(u.name)}</h2>
-          <div style="font-size:13px;color:var(--ui-muted);">${escapeHtml(u.email || '')} ${u.phone ? '• SĐT: ' + escapeHtml(u.phone) : ''} • Đăng ký qua ${(u.provider || 'gmail').toUpperCase()}</div>
+          <div style="font-size:13px;color:var(--ui-muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <span>${escapeHtml(u.email || '')} ${u.phone ? '• SĐT: ' + escapeHtml(u.phone) : ''} • Kênh: ${(u.provider || 'gmail').toUpperCase()}</span>
+            ${u.phoneVerified ? `<span class="badge badge-paid">SĐT đã xác thực OTP</span>` : ''}
+            ${u.emailVerified ? `<span class="badge badge-paid">Gmail đã xác thực</span>` : ''}
+          </div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <a href="#chon-mau-tu-sua" class="btn btn-primary btn-sm">+ Chọn Mẫu Mới Tự Sửa &amp; Thanh Toán</a>
@@ -1544,8 +2106,56 @@ async function renderCustomerAccountView() {
       </div>
 
       <div class="panel-card" style="margin-bottom:20px;">
+        <div style="margin-bottom:12px;">
+          <h3 style="margin:0 0 4px;font-size:16px;">Liên Kết Tài Khoản Facebook &amp; Google</h3>
+          <small style="color:var(--ui-muted);">Liên kết Facebook hoặc Google với tài khoản hiện tại để đăng nhập 1 chạm mà vẫn giữ nguyên toàn bộ thiệp cưới và đơn hàng của bạn.</small>
+        </div>
+        <div class="social-link-grid">
+          <div class="social-link-card ${hasFb ? 'is-linked' : ''}">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+              <div class="social-link-ico is-fb">${FACEBOOK_ICON_SVG}</div>
+              <div style="min-width:0;">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <strong style="font-size:13.5px;">Facebook</strong>
+                  <span class="badge ${hasFb ? 'badge-paid' : 'badge-trial'}">${hasFb ? 'Đã liên kết' : 'Chưa liên kết'}</span>
+                </div>
+                <div style="font-size:12px;color:var(--ui-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  ${hasFb ? escapeHtml(u.facebookName || u.facebookEmail || `ID: ${u.facebookId}`) : 'Kết nối để đăng nhập nhanh bằng tài khoản Facebook'}
+                </div>
+              </div>
+            </div>
+            <div style="flex-shrink:0;">
+              ${hasFb
+                ? `<button type="button" class="btn btn-outline btn-xs" data-unlink-social="facebook">Hủy liên kết</button>`
+                : `<button type="button" class="btn btn-primary btn-xs" data-link-social="facebook">Liên kết Facebook</button>`}
+            </div>
+          </div>
+
+          <div class="social-link-card ${hasGoogle ? 'is-linked' : ''}">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+              <div class="social-link-ico is-google">${GOOGLE_ICON_SVG}</div>
+              <div style="min-width:0;">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                  <strong style="font-size:13.5px;">Google (Gmail)</strong>
+                  <span class="badge ${hasGoogle ? 'badge-paid' : 'badge-trial'}">${hasGoogle ? 'Đã liên kết' : 'Chưa liên kết'}</span>
+                </div>
+                <div style="font-size:12px;color:var(--ui-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                  ${hasGoogle ? escapeHtml(u.googleEmail || u.googleName || u.email || 'Đã kết nối Google') : 'Kết nối để đăng nhập nhanh bằng tài khoản Google'}
+                </div>
+              </div>
+            </div>
+            <div style="flex-shrink:0;">
+              ${hasGoogle
+                ? `<button type="button" class="btn btn-outline btn-xs" data-unlink-social="google">Hủy liên kết</button>`
+                : `<button type="button" class="btn btn-primary btn-xs" data-link-social="google">Liên kết Google</button>`}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-card" style="margin-bottom:20px;">
         <h3 style="margin:0 0 6px;font-size:16px;">Thiệp Cưới Của Tôi (${data.invitations.length})</h3>
-        <p style="font-size:12.5px;color:var(--ui-muted);margin:0 0 14px;">Bấm <strong>Sửa Ảnh &amp; Từng Phần</strong> để tự thay ảnh cưới, sửa chữ từng mục trên thiệp và bấm <strong>Thanh Toán Ngay</strong> cho đúng mẫu bạn đã chỉnh.</p>
+        <p style="font-size:12.5px;color:var(--ui-muted);margin:0 0 14px;">Bấm <strong>Sửa Ảnh &amp; Từng Phần</strong> để tự thay ảnh cưới, sửa chữ từng mục trên thiệp và bấm <strong>Thanh Toán Ngay</strong> để mở khóa link chia sẻ chính thức.</p>
         ${data.invitations.length === 0 ? `<p style="font-size:13px;color:var(--ui-muted);margin:0;">Bạn chưa tạo mẫu thiệp nào. Hãy chọn ngay 1 mẫu yêu thích bên dưới để tự tải ảnh, sửa nội dung và thanh toán trực tiếp!</p>` : `
           <div class="orders-table-wrap">
             <table class="data-table">
@@ -1561,7 +2171,7 @@ async function renderCustomerAccountView() {
                       <strong>${escapeHtml(inv.title)}</strong>
                       <div style="font-size:12px;color:var(--ui-muted);">Mẫu: ${escapeHtml(inv.templateName || inv.templateId || 'Đã chọn')} • ${(inv.content?.gallery || []).length}${ts.active ? `/${ts.limits.maxPhotos}` : ''} ảnh Album</div>
                     </td>
-                    <td>${escapeHtml(inv.order?.packageName || 'Gói Tiêu Chuẩn 3D')} — <strong>${inv.order?.price ? formatVnd(inv.order?.price) : 'Miễn phí thử'}</strong></td>
+                    <td>${escapeHtml(inv.order?.packageName || 'Gói Tiêu Chuẩn')} — <strong>${inv.order?.price ? formatVnd(inv.order?.price) : 'Miễn phí thử'}</strong></td>
                     <td>
                       <span class="badge ${isPaid ? 'badge-paid' : isSubmitted ? 'badge-deposit' : 'badge-trial'}">
                         ${isPaid ? 'Đã kích hoạt VIP' : isSubmitted ? 'Đang chờ duyệt CK' : ts.active ? `Dùng thử ${ts.days} ngày • ${ts.remainingText}` : 'Bản nháp — Chưa thanh toán'}
@@ -1571,7 +2181,7 @@ async function renderCustomerAccountView() {
                       <div style="display:flex;gap:6px;flex-wrap:wrap;">
                         <a class="btn btn-primary btn-xs" href="${escapeHtml(buildAbsoluteUrl({ role: 'client', id: inv.id, token: inv.clientToken }))}">${ts.expired ? 'Xem &amp; Nâng Cấp' : 'Sửa Ảnh &amp; Từng Phần'}</a>
                         <a class="btn ${isPaid ? 'btn-outline' : 'btn-gold'} btn-xs" href="${escapeHtml(buildAbsoluteUrl({ role: 'checkout', id: inv.id, token: inv.clientToken }))}">${isPaid ? 'Nhận Sản Phẩm &amp; QR' : (ts.active ? 'Chuyển Tiền Mở Khóa' : 'Sang Trang Chuyển Tiền')}</a>
-                        <a class="btn btn-outline btn-xs" href="${escapeHtml(buildAbsoluteUrl({ role: 'guest', id: inv.id }))}" target="_blank">Xem Thiệp</a>
+                        ${isPaid ? `<a class="btn btn-outline btn-xs" href="${escapeHtml(buildAbsoluteUrl({ role: 'guest', id: inv.id }))}" target="_blank">Xem Thiệp</a>` : ''}
                       </div>
                     </td>
                   </tr>
@@ -1637,6 +2247,26 @@ async function renderCustomerAccountView() {
   appRoot.querySelector('[data-acc-book]')?.addEventListener('click', () => openBookingModal(settings));
   appRoot.querySelector('[data-acc-qr]')?.addEventListener('click', () => openPaymentQrModal({ pkgIdx: 1, settings }));
   appRoot.querySelector('[data-acc-logout]')?.addEventListener('click', async () => { await storage.authLogout(); showToast('Đã đăng xuất', 'info'); navigateTo({ view: 'store' }); });
+  appRoot.querySelector('[data-link-social="facebook"]')?.addEventListener('click', () => {
+    runFacebookSocialFlow({ mode: 'link', onSuccess: () => renderCustomerAccountView() });
+  });
+  appRoot.querySelector('[data-link-social="google"]')?.addEventListener('click', () => {
+    runGoogleSocialFlow({ mode: 'link', onSuccess: () => renderCustomerAccountView() });
+  });
+  appRoot.querySelectorAll('[data-unlink-social]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const prov = btn.dataset.unlinkSocial;
+      const label = prov === 'facebook' ? 'Facebook' : 'Google';
+      if (!confirm(`Xác nhận hủy liên kết tài khoản ${label}?`)) return;
+      try {
+        await storage.unlinkSocial(prov);
+        showToast(`Đã hủy liên kết tài khoản ${label}`, 'info');
+        renderCustomerAccountView();
+      } catch (err) {
+        showToast(err.message || `Không thể hủy liên kết ${label}`, 'error');
+      }
+    });
+  });
   appRoot.querySelectorAll('[data-acc-customize]').forEach(b => b.addEventListener('click', () => startCustomerCustomizeTemplate(b.dataset.accCustomize)));
   appRoot.querySelectorAll('[data-acc-preview]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1984,15 +2614,15 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
     const isQrStep = Boolean(activePayment && activePayment.code);
 
     document.title = isQrStep
-      ? `Quét Mã QR Thanh Toán ${activePayment.code} — ${settings.brandName || "L'Amour Atelier"}`
-      : `Thanh Toán Trực Tiếp — ${settings.brandName || "L'Amour Atelier"}`;
+      ? `Quét Mã QR Thanh Toán ${activePayment.code} — ${settings.brandName || 'DaiLo Wedding'}`
+      : `Thanh Toán Trực Tiếp — ${settings.brandName || 'DaiLo Wedding'}`;
 
     appRoot.innerHTML = `
       <header class="top-nav">
         <div class="brand-mark" data-co-home>
-          <div class="brand-monogram">L</div>
+          <div class="brand-monogram">DL</div>
           <div>
-            <div class="brand-script-name">${escapeHtml(settings.brandName || "L'Amour Atelier")}</div>
+            <div class="brand-script-name">${escapeHtml(settings.brandName || 'DaiLo Wedding')}</div>
             <div class="brand-sub-status"><span>${isQrStep ? 'Quét Mã QR VietQR — Tự Động Chuyển Trang Bàn Giao' : 'Thanh Toán Tự Động Không Cần Chờ Duyệt'}</span></div>
           </div>
         </div>
@@ -2239,7 +2869,8 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
       if (btn) { btn.disabled = true; btn.textContent = 'Đang tạo mã QR thanh toán...'; }
       try {
         const tplObj = allTemplates.find(t => t.id === selectedTplId) || allTemplates[0];
-        const draftInit = !inv && tplObj ? createInvitationFromTemplate(tplObj, { customerName: custName.trim(), customerPhone: ck.digits, packageName: curPkg.name, price: curPkg.price }) : null;
+        const draftInit = !inv && tplObj ? createInvitationFromTemplate(tplObj.id, { customerName: custName.trim(), customerPhone: ck.digits, packageName: curPkg.name, price: curPkg.price }) : null;
+        if (draftInit && tplObj?.design) draftInit.design = JSON.parse(JSON.stringify(tplObj.design));
         const created = await storage.createPaymentOrder({
           invitationId: inv?.id || '',
           templateId: inv?.templateId || selectedTplId,
@@ -2308,14 +2939,14 @@ async function renderHandoverPage(invId, token) {
   const inviteQrImg = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&margin=8&data=${encodeURIComponent(guestUrl)}`;
   const paidTime = inv.order?.paidAt ? new Date(inv.order.paidAt).toLocaleString('vi-VN') : new Date().toLocaleString('vi-VN');
 
-  document.title = `Bàn Giao Thiệp Cưới — ${inv.title || settings.brandName || "L'Amour Atelier"}`;
+  document.title = `Bàn Giao Thiệp Cưới — ${inv.title || settings.brandName || 'DaiLo Wedding'}`;
 
   appRoot.innerHTML = `
     <header class="top-nav">
       <div class="brand-mark" data-ho-home>
-        <div class="brand-monogram">L</div>
+        <div class="brand-monogram">DL</div>
         <div>
-          <div class="brand-script-name">${escapeHtml(settings.brandName || "L'Amour Atelier")}</div>
+          <div class="brand-script-name">${escapeHtml(settings.brandName || 'DaiLo Wedding')}</div>
           <div class="brand-sub-status"><span class="status-dot online"></span><span>Trang Bàn Giao Thiệp Cưới Chính Thức</span></div>
         </div>
       </div>
@@ -2401,19 +3032,21 @@ async function renderGuestView(invId, guestName, blankMode) {
   cleanupActive();
   hideChatWidget();
   try {
-    const res = await storage.getInvitation(invId, 'guest');
+    const res = await storage.getInvitation(invId, 'guest', '', { blank: blankMode });
     const inv = res.invitation;
-    document.title = blankMode ? `Xem Mẫu — ${res.settings?.brandName || "L'Amour Atelier"}` : `Thiệp Cưới ${inv.content?.groomName || ''} & ${inv.content?.brideName || ''}`;
+    document.title = blankMode ? `Xem Mẫu — ${res.settings?.brandName || 'DaiLo Wedding'}` : `Thiệp Cưới ${inv.content?.groomName || ''} & ${inv.content?.brideName || ''}`;
     const renderer = new InvitationRenderer(appRoot, {
       inPreview: false, editable: false, blankMode, guestName, skipIntro: false,
-      brandName: res.settings?.brandName || "L'Amour Atelier", onToast: showToast,
+      brandName: res.settings?.brandName || 'DaiLo Wedding', onToast: showToast,
       onGuestSubmit: async payload => await storage.guestSubmit(invId, payload),
     });
     activeInstance = renderer;
     renderer.render(inv);
   } catch (err) {
-    appRoot.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;"><div class="panel-card" style="max-width:440px;text-align:center;"><h2>Không Tìm Thấy Thiệp Cưới</h2><p style="color:var(--ui-muted);">${escapeHtml(err.message || '')}</p><button type="button" class="btn btn-primary" data-go-home>Xem Kho Mẫu</button></div></div>`;
+    const isPaymentLocked = Boolean(err?.paymentRequired);
+    appRoot.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;"><div class="panel-card" style="max-width:440px;text-align:center;"><h2>${isPaymentLocked ? 'Thiệp Cưới Chưa Được Kích Hoạt' : 'Không Tìm Thấy Thiệp Cưới'}</h2><p style="color:var(--ui-muted);">${escapeHtml(err.message || '')}</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">${isPaymentLocked ? '<button type="button" class="btn btn-gold" data-go-account>Đăng Nhập &amp; Thanh Toán</button>' : ''}<button type="button" class="btn btn-primary" data-go-home>Xem Kho Mẫu</button></div></div></div>`;
     appRoot.querySelector('[data-go-home]')?.addEventListener('click', () => navigateTo({ view: 'store' }));
+    appRoot.querySelector('[data-go-account]')?.addEventListener('click', () => navigateTo({ role: 'account' }));
   }
 }
 
@@ -2455,7 +3088,7 @@ window.addEventListener('popstate', route);
       });
       if (chatOpen) {
         currentChatThread = await storage.getChatThread();
-        renderChatWidget();
+        renderChatWidget(publicStore?.settings || {});
       }
     } catch (_) {}
   };
@@ -2463,6 +3096,7 @@ window.addEventListener('popstate', route);
   const sp = new URLSearchParams(window.location.search);
   const oauthToken = sp.get('oauth_token');
   const oauthProvider = sp.get('oauth_provider') || '';
+  const oauthLinked = sp.get('oauth_linked') || '';
   const oauthError = sp.get('oauth_error');
   if (oauthToken) {
     const cleanUrl = new URL(window.location.href);
@@ -2472,7 +3106,15 @@ window.addEventListener('popstate', route);
     const user = await storage.completeOAuthToken(oauthToken);
     if (user) {
       showToast(`Đăng nhập ${oauthProvider === 'facebook' ? 'Facebook' : 'Google'} thành công! Chào mừng ${user.name}`, 'success');
+    } else {
+      showToast('Không thể hoàn tất phiên đăng nhập mạng xã hội. Vui lòng thử lại.', 'error');
     }
+  } else if (oauthLinked) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('oauth_linked');
+    window.history.replaceState({}, '', cleanUrl.toString());
+    await storage.verifySession();
+    showToast(`Đã liên kết tài khoản ${oauthLinked === 'facebook' ? 'Facebook' : 'Google'} thành công!`, 'success');
   } else if (oauthError) {
     const cleanUrl = new URL(window.location.href);
     cleanUrl.searchParams.delete('oauth_error');

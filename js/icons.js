@@ -1,5 +1,5 @@
 /**
- * L'Amour Atelier — Minimal Functional Icon Set (Ultra-thin 1.35px stroke)
+ * DaiLo Wedding — Minimal Functional Icon Set (Ultra-thin 1.35px stroke)
  * Chỉ dùng cho các nút chức năng thực sự cần thiết (đóng, sao chép, mũi tên, thanh công cụ).
  * Tuyệt đối không chèn icon thừa lên tiêu đề hay nút văn bản.
  */
@@ -37,6 +37,8 @@ const PATHS = {
   play: '<polygon points="6 3 20 12 6 21 6 3"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
   creditCard: '<rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
 };
 
 export function icon(name, size = 15, extraClass = '') {

@@ -1,5 +1,5 @@
 /* ==========================================================================
-   L'AMOUR ATELIER — GIAO DIỆN QUẢN LÝ, TRÌNH SOẠN THIỆP & SHOWROOM CAO CẤP
+   DAILO WEDDING — GIAO DIỆN QUẢN LÝ, TRÌNH SOẠN THIỆP & SHOWROOM CAO CẤP
    Phong cách biên tập tinh gọn (ChungDoi + 27BigGroup + Linear/Figma) — 0 Emoji
    ========================================================================== */
 
@@ -306,8 +306,9 @@ button, input, select, textarea { font-family: inherit; }
   align-items: center;
   justify-content: center;
   font-family: 'Viaoda Libre', serif;
-  font-size: 20px;
-  letter-spacing: -0.5px;
+  font-size: 15.5px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
 }
 
 .brand-script-name {
@@ -1191,6 +1192,154 @@ button, input, select, textarea { font-family: inherit; }
 .social-auth-btn:hover { background: #faf8f5; border-color: var(--ui-brand); }
 .social-auth-btn.is-fb { background: #1877f2; border-color: #1877f2; color: #ffffff; }
 .social-auth-btn.is-fb:hover { background: #1464cc; }
+.social-auth-btn.is-google { background: #ffffff; border-color: #dadce0; color: #1f1f1f; }
+.social-auth-btn.is-google:hover { background: #f8f9fa; border-color: #b8bcc2; }
+
+.auth-submode-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.auth-submode-btn {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface-soft);
+  color: var(--ui-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.auth-submode-btn.active {
+  background: var(--ui-brand-soft);
+  border-color: rgba(143, 29, 50, 0.35);
+  color: var(--ui-brand);
+}
+
+.otp-steps-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  font-size: 11px;
+}
+
+.otp-step-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f3f1ed;
+  color: var(--ui-muted);
+  font-weight: 600;
+}
+.otp-step-pill.active {
+  background: var(--ui-brand-soft);
+  color: var(--ui-brand);
+}
+.otp-step-pill.done {
+  background: #e8f5ee;
+  color: #11623d;
+}
+
+.otp-code-input {
+  text-align: center;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 8px;
+  font-variant-numeric: tabular-nums;
+  padding: 11px 12px;
+}
+
+.otp-info-box {
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: var(--ui-surface-soft);
+  border: 1px solid var(--ui-border);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.otp-info-box.is-success {
+  background: #eef8f1;
+  border-color: #bfe4cb;
+  color: #14532d;
+}
+
+.otp-preview-card {
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: #fdf6e7;
+  border: 1px dashed #d6b16d;
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.otp-preview-code {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: 6px;
+  color: var(--ui-brand);
+  font-variant-numeric: tabular-nums;
+  margin: 6px 0;
+}
+
+.otp-verified-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: 10px;
+  background: #eef8f1;
+  border: 1px solid #b7e2c8;
+  color: #14532d;
+  font-size: 12.5px;
+  margin-bottom: 14px;
+}
+
+.social-link-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .social-link-grid { grid-template-columns: 1fr; }
+}
+
+.social-link-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--ui-border);
+  background: var(--ui-surface-soft);
+}
+.social-link-card.is-linked {
+  background: #f5fbf7;
+  border-color: #bfe4cb;
+}
+
+.social-link-ico {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.social-link-ico.is-fb {
+  background: #1877f2;
+  color: #ffffff;
+}
+.social-link-ico.is-google {
+  background: #ffffff;
+  border: 1px solid #dadce0;
+}
 
 .auth-or-divider {
   display: flex;

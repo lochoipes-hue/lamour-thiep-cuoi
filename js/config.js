@@ -1,5 +1,5 @@
 /**
- * L'Amour Atelier — Cloud Backend Configuration (v14)
+ * DaiLo Wedding — Cloud Backend Configuration (v15)
  * Frontend: Vercel (Static Edge CDN) | Backend: Render Web Service (Node.js + PostgreSQL / Persistent Disk)
  *
  * Sau khi deploy Backend lên Render, nếu URL Render khác mặc định, chỉ cần sửa dòng

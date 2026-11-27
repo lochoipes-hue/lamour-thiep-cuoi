@@ -1,5 +1,5 @@
 /**
- * L'Amour Atelier — Bộ Ảnh Nền Mờ Nghệ Thuật & Hoa Văn Chạm Khắc Ép Kim Cao Cấp
+ * DaiLo Wedding — Bộ Ảnh Nền Mờ Nghệ Thuật & Hoa Văn Chạm Khắc Ép Kim Cao Cấp
  * Thay thế hoàn toàn các họa tiết hình học thô bằng:
  *  - 8 Ảnh nền không gian mờ cuốn hút (Cover & Hero Atmospheric Photo Backdrops)
  *  - Khung hoa văn chạm khắc Baroque / Song Hỷ / Botanical / Art Deco siêu mảnh chuẩn in ép kim

@@ -1,12 +1,12 @@
 /**
- * L'Amour Atelier — Hybrid Storage, Auth, Live Chat & Booking Client (v14)
+ * DaiLo Wedding — Hybrid Storage, Auth, Live Chat & Booking Client (v15)
  * Tự động kết nối Render Cloud Backend / Netlify Functions (/api) hoặc PHP API (api.php);
  * Hỗ trợ tự động đánh thức Render Free khi ngủ đông & fallback mượt sang localStorage.
  */
 
-import { createInitialSeedDb, TEMPLATES, DEFAULT_PACKAGES_V9, buildTrialConfig, createInvitationFromTemplate } from './data.js?v=14';
-import { runLocalChatbot, DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
-import { CLOUD_CONFIG } from './config.js?v=14';
+import { createInitialSeedDb, TEMPLATES, DEFAULT_PACKAGES_V9, buildTrialConfig, createInvitationFromTemplate } from './data.js?v=15';
+import { runLocalChatbot, DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=15';
+import { CLOUD_CONFIG } from './config.js?v=15';
 
 const LOCAL_KEY = 'lamour_wedding_studio_db_v5';
 const AUTH_TOKEN_KEY = 'lamour_auth_token_v5';
@@ -350,6 +350,7 @@ class StorageService {
     const role = sp.get('role') || '';
     const needsCloudNow = Boolean(
       sp.get('oauth_token')
+      || sp.get('oauth_linked')
       || ['guest', 'client', 'checkout', 'handover', 'admin', 'account'].includes(role)
     );
     const cloudTimeout = needsCloudNow ? CLOUD_CONFIG.coldStartTimeoutMs : CLOUD_CONFIG.fastCloudTimeoutMs;
@@ -458,9 +459,11 @@ class StorageService {
           id: 'usr_admin_master',
           role: 'admin',
           provider: 'gmail',
-          name: 'Quản Trị Viên Studio',
+          name: 'Quản Trị Viên DaiLo Wedding',
           email: 'lochoipes@gmail.com',
           phone: '0354248177',
+          emailVerified: true,
+          hasPassword: true,
           passwordSha256: ADMIN_PASS_HASH,
           createdAt: new Date().toISOString(),
         },
@@ -500,6 +503,25 @@ class StorageService {
         db.version = 11;
         db.chatbotConfig = db.chatbotConfig || JSON.parse(JSON.stringify(DEFAULT_CHATBOT_CONFIG));
         db.chatbotConfig.customerQuickPrompts = JSON.parse(JSON.stringify(DEFAULT_CHATBOT_CONFIG.customerQuickPrompts));
+        changed = true;
+      }
+      if ((db.version || 0) < 15) {
+        const legacyBrandRe = /l['’]?amour(\s+atelier)?/gi;
+        db.version = 15;
+        db.settings = db.settings || {};
+        if (!db.settings.brandName || /^\s*l['’]?amour(\s+atelier)?\s*$/i.test(String(db.settings.brandName))) {
+          db.settings.brandName = 'DaiLo Wedding';
+        }
+        if (db.chatbotConfig) {
+          for (const field of ['greeting', 'aiSystemPrompt', 'fallbackReply']) {
+            if (typeof db.chatbotConfig[field] === 'string' && /l['’]?amour(\s+atelier)?/i.test(db.chatbotConfig[field])) {
+              db.chatbotConfig[field] = db.chatbotConfig[field].replace(legacyBrandRe, 'DaiLo Wedding');
+            }
+          }
+        }
+        if (admin && typeof admin.name === 'string' && /l['’]?amour(\s+atelier)?/i.test(admin.name)) {
+          admin.name = admin.name.replace(legacyBrandRe, 'DaiLo Wedding');
+        }
         changed = true;
       }
       if (changed) localStorage.setItem(LOCAL_KEY, JSON.stringify(db));
@@ -570,21 +592,136 @@ class StorageService {
     return await this.verifySession();
   }
 
+  async sendOtp({ channel = 'gmail', target = '', purpose = 'register' }) {
+    const ch = String(channel || 'gmail').toLowerCase();
+    let cleanTarget = '';
+    if (ch === 'gmail') {
+      cleanTarget = String(target || '').trim().toLowerCase();
+      if (!isStrictGmail(cleanTarget)) {
+        throw new Error('Vui lòng nhập đúng địa chỉ Gmail hợp lệ (định dạng tenban@gmail.com)');
+      }
+    } else if (ch === 'phone') {
+      const ck = validateVnPhone10(target);
+      if (!ck.ok) throw new Error(ck.error);
+      cleanTarget = ck.digits;
+    } else {
+      throw new Error('Kênh gửi mã không hợp lệ');
+    }
+
+    if (this.isCloudOnline()) {
+      const res = await fetch(this.apiUrl('action=auth_otp_send'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: ch, target: cleanTarget, purpose }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        const err = new Error(data.error || 'Không gửi được mã xác thực');
+        if (data.retryAfterSec) err.retryAfterSec = Number(data.retryAfterSec);
+        throw err;
+      }
+      return data;
+    }
+
+    // Local fallback OTP (enforces exact same rules as backend!)
+    const db = this.readLocalDb();
+    db.users = db.users || [];
+    db._localOtps = db._localOtps || {};
+    const existing = db.users.find(u =>
+      ch === 'gmail' ? (u.email || '').toLowerCase() === cleanTarget : (u.phone || '').replace(/\D/g, '') === cleanTarget
+    );
+    if (purpose === 'register' && existing) {
+      throw new Error(ch === 'gmail' ? 'Gmail này đã được đăng ký tài khoản, vui lòng đăng nhập' : 'Số điện thoại này đã được đăng ký tài khoản, vui lòng đăng nhập');
+    }
+    if (purpose === 'login') {
+      throw new Error('Đăng nhập bằng mã OTP cần kết nối Cloud Backend đã bật Email/SMS thật. Vui lòng đăng nhập bằng Mật khẩu.');
+    }
+    const key = `${purpose}:${ch}:${cleanTarget}`;
+    const now = Date.now();
+    const prev = db._localOtps[key];
+    if (prev && prev.resendAfter > now) {
+      const sec = Math.max(1, Math.ceil((prev.resendAfter - now) / 1000));
+      const err = new Error(`Vui lòng đợi ${sec} giây trước khi gửi lại mã xác thực.`);
+      err.retryAfterSec = sec;
+      throw err;
+    }
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    db._localOtps[key] = {
+      code,
+      attempts: 0,
+      maxAttempts: 5,
+      sentAt: now,
+      resendAfter: now + 30 * 1000,
+      expiresAt: now + 5 * 60 * 1000,
+      verified: false,
+      verificationToken: '',
+      verifiedExpiresAt: 0,
+    };
+    this.writeLocalDb(db);
+    return {
+      ok: true,
+      sent: true,
+      channel: ch,
+      target: cleanTarget,
+      purpose,
+      delivery: 'on_screen_fallback',
+      previewCode: code,
+      expiresInSec: 300,
+      cooldownSec: 30,
+      notice: 'Chế độ cục bộ — hãy nhập mã xác thực 6 số hiển thị bên dưới để tiếp tục đăng ký.',
+    };
+  }
+
+  async verifyOtp({ channel = 'gmail', target = '', code = '', purpose = 'register' }) {
+    const ch = String(channel || 'gmail').toLowerCase();
+    const cleanTarget = ch === 'gmail' ? String(target || '').trim().toLowerCase() : sanitizeVnPhone10(target);
+    const cleanCode = String(code || '').replace(/\D/g, '').slice(0, 6);
+    if (cleanCode.length !== 6) {
+      throw new Error('Vui lòng nhập đầy đủ mã xác thực gồm 6 chữ số.');
+    }
+
+    if (this.isCloudOnline()) {
+      const res = await fetch(this.apiUrl('action=auth_otp_verify'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: ch, target: cleanTarget, code: cleanCode, purpose }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Mã xác thực không chính xác');
+      return data;
+    }
+
+    const db = this.readLocalDb();
+    db._localOtps = db._localOtps || {};
+    const key = `${purpose}:${ch}:${cleanTarget}`;
+    const rec = db._localOtps[key];
+    const now = Date.now();
+    if (!rec || rec.expiresAt < now) {
+      if (rec) { delete db._localOtps[key]; this.writeLocalDb(db); }
+      throw new Error('Mã xác thực đã hết hạn hoặc chưa được gửi. Vui lòng bấm Gửi mã mới.');
+    }
+    if (Number(rec.attempts || 0) >= Number(rec.maxAttempts || 5)) {
+      delete db._localOtps[key];
+      this.writeLocalDb(db);
+      throw new Error('Bạn đã nhập sai mã quá 5 lần. Vui lòng gửi lại mã mới.');
+    }
+    if (rec.code !== cleanCode) {
+      rec.attempts = Number(rec.attempts || 0) + 1;
+      const remain = Math.max(0, Number(rec.maxAttempts || 5) - rec.attempts);
+      if (remain <= 0) delete db._localOtps[key];
+      this.writeLocalDb(db);
+      throw new Error(remain > 0 ? `Mã xác thực 6 số không chính xác (còn ${remain} lần thử).` : 'Bạn đã nhập sai mã quá 5 lần. Vui lòng gửi lại mã mới.');
+    }
+    const token = 'otpv_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    rec.verified = true;
+    rec.verificationToken = token;
+    rec.verifiedExpiresAt = now + 10 * 60 * 1000;
+    this.writeLocalDb(db);
+    return { ok: true, verified: true, verificationToken: token, channel: ch, target: cleanTarget, purpose };
+  }
+
   async sendGmailOtp(email) {
-    if (!isStrictGmail(email)) {
-      throw new Error('Vui lòng nhập đúng địa chỉ Gmail hợp lệ (định dạng tenban@gmail.com)');
-    }
-    if (!this.isCloudOnline()) {
-      throw new Error('Gửi mã OTP Gmail cần chạy trên hệ thống Backend');
-    }
-    const res = await fetch(this.apiUrl('action=auth_gmail_otp_send'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.ok) throw new Error(data.error || 'Không gửi được mã xác thực Gmail');
-    return data;
+    return await this.sendOtp({ channel: 'gmail', target: email, purpose: 'register' });
   }
 
   async loginWithFacebookToken(accessToken) {
@@ -599,6 +736,80 @@ class StorageService {
     const data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || 'Đăng nhập Facebook thất bại');
     this.setSession(data.token, data.user);
+    return data.user;
+  }
+
+  async loginWithGoogleToken({ idToken = '', accessToken = '' }) {
+    if (!this.isCloudOnline()) {
+      throw new Error('Đăng nhập Google trực tiếp cần kết nối Render / Netlify Cloud Backend');
+    }
+    const res = await fetch(this.apiUrl('action=auth_login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'google_token', idToken, accessToken }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Đăng nhập Google thất bại');
+    this.setSession(data.token, data.user);
+    return data.user;
+  }
+
+  async loginWithOtp({ channel = 'gmail', identifier = '', otpCode = '', otpVerificationToken = '' }) {
+    if (!this.isCloudOnline()) {
+      throw new Error('Đăng nhập bằng mã OTP cần kết nối Cloud Backend đã bật Email/SMS thật');
+    }
+    const res = await fetch(this.apiUrl('action=auth_login'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: 'otp', channel, identifier, otpCode, otpVerificationToken }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Đăng nhập bằng mã OTP thất bại');
+    this.setSession(data.token, data.user);
+    return data.user;
+  }
+
+  async initSocialLink(provider, returnTo) {
+    if (!this.isCloudOnline()) {
+      throw new Error('Liên kết tài khoản Facebook/Google cần kết nối Cloud Backend');
+    }
+    const res = await fetch(this.apiUrl('action=oauth_link_init'), {
+      method: 'POST',
+      headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ provider, returnTo }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể khởi tạo liên kết tài khoản');
+    return data;
+  }
+
+  async linkSocialToken({ provider, accessToken = '', idToken = '' }) {
+    if (!this.isCloudOnline()) {
+      throw new Error('Liên kết tài khoản Facebook/Google cần kết nối Cloud Backend');
+    }
+    const res = await fetch(this.apiUrl('action=auth_link_social'), {
+      method: 'POST',
+      headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ provider, accessToken, idToken }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Liên kết tài khoản thất bại');
+    if (data.user) this.setSession(this.authToken, data.user);
+    return data.user;
+  }
+
+  async unlinkSocial(provider) {
+    if (!this.isCloudOnline()) {
+      throw new Error('Hủy liên kết cần kết nối Cloud Backend');
+    }
+    const res = await fetch(this.apiUrl('action=auth_unlink_social'), {
+      method: 'POST',
+      headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ provider }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể hủy liên kết tài khoản');
+    if (data.user) this.setSession(this.authToken, data.user);
     return data.user;
   }
 
@@ -650,12 +861,12 @@ class StorageService {
     return safe;
   }
 
-  async authRegister({ provider = 'gmail', name = '', email = '', confirmEmail = '', phone = '', password = '', otpCode = '' }) {
+  async authRegister({ provider = 'gmail', name = '', email = '', confirmEmail = '', phone = '', password = '', otpCode = '', otpVerificationToken = '' }) {
     if (this.isCloudOnline()) {
       const res = await fetch(this.apiUrl('action=auth_register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider, name, email, confirmEmail, phone, password, otpCode }),
+        body: JSON.stringify({ provider, name, email, confirmEmail, phone, password, otpCode, otpVerificationToken }),
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Đăng ký thất bại');
@@ -664,6 +875,7 @@ class StorageService {
     }
     const db = this.readLocalDb();
     db.users = db.users || [];
+    db._localOtps = db._localOtps || {};
     const normEmail = email.trim().toLowerCase();
     const normConfirm = confirmEmail.trim().toLowerCase();
     const rawPhone = String(phone || '').trim();
@@ -687,10 +899,47 @@ class StorageService {
       const ck = validateVnPhone10(rawPhone);
       if (!ck.ok) throw new Error(ck.error);
     }
+    if (String(password || '').length < 6) {
+      throw new Error('Mật khẩu tối thiểu 6 ký tự');
+    }
+    const otpTarget = provider === 'phone' ? cleanPhone : normEmail;
+    const otpKey = `register:${provider}:${otpTarget}`;
+    const otpRec = db._localOtps[otpKey];
+    const now = Date.now();
+    let otpOk = false;
+    if (otpRec) {
+      if (otpVerificationToken && otpRec.verified && otpRec.verifiedExpiresAt >= now && otpRec.verificationToken === otpVerificationToken) {
+        otpOk = true;
+      } else if (otpCode && otpRec.expiresAt >= now && Number(otpRec.attempts || 0) < Number(otpRec.maxAttempts || 5)) {
+        if (otpRec.code === String(otpCode).replace(/\D/g, '')) {
+          otpOk = true;
+        } else {
+          otpRec.attempts = Number(otpRec.attempts || 0) + 1;
+          if (otpRec.attempts >= Number(otpRec.maxAttempts || 5)) delete db._localOtps[otpKey];
+          this.writeLocalDb(db);
+        }
+      }
+    }
+    if (!otpOk) {
+      throw new Error(`Vui lòng gửi mã xác thực 6 số về ${provider === 'phone' ? 'Số điện thoại' : 'Gmail'} và xác minh mã trước khi đăng ký.`);
+    }
     if (normEmail && db.users.some(u => (u.email || '').toLowerCase() === normEmail)) throw new Error('Gmail này đã được đăng ký, vui lòng đăng nhập');
     if (cleanPhone && db.users.some(u => (u.phone || '').replace(/\D/g, '') === cleanPhone)) throw new Error('SĐT này đã được đăng ký');
+    delete db._localOtps[otpKey];
     const pwHash = await hashLocalPassword(password);
-    const u = { id: 'usr_' + Date.now(), role: 'customer', provider, name: name.trim(), email: normEmail, phone: cleanPhone, passwordSha256: pwHash, createdAt: new Date().toISOString() };
+    const u = {
+      id: 'usr_' + Date.now(),
+      role: 'customer',
+      provider,
+      name: name.trim(),
+      email: normEmail,
+      phone: cleanPhone,
+      emailVerified: provider === 'gmail',
+      phoneVerified: provider === 'phone',
+      hasPassword: true,
+      passwordSha256: pwHash,
+      createdAt: new Date().toISOString(),
+    };
     db.users.push(u);
     this.writeLocalDb(db);
     const safe = { ...u }; delete safe.passwordSha256;
@@ -853,6 +1102,7 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể hoàn tất thanh toán');
+      if (data.invitation) this.resolveInvitationMedia(data.invitation);
       return data;
     }
     const db = this.readLocalDb();
@@ -948,20 +1198,21 @@ class StorageService {
     }
     if (!inv) {
       const tplObj = (db.templates || TEMPLATES).find(t => t.id === cleanPayload.templateId) || (db.templates || TEMPLATES)[0];
-      inv = createInvitationFromTemplate(tplObj, {
+      inv = createInvitationFromTemplate(tplObj?.id || cleanPayload.templateId || 'nhung-do-co-dien', {
         customerName: cleanPayload.name,
         customerPhone: cleanPayload.phone,
         customerEmail: cleanPayload.email || this.currentUser?.email || '',
         packageName: matchedPkg?.name || 'Gói Tiêu Chuẩn',
         price: amount,
       });
+      if (tplObj?.design) inv.design = JSON.parse(JSON.stringify(tplObj.design));
       inv.order.userId = this.currentUser?.id || '';
       inv.order.status = 'pending_payment';
       db.invitations.unshift(inv);
     }
 
     const nowMs = Date.now();
-    const code = 'LAMOUR' + Math.random().toString(36).replace(/[^a-z0-9]/g, '').toUpperCase().slice(0, 6).padEnd(6, '8');
+    const code = 'DAILO' + Math.random().toString(36).replace(/[^a-z0-9]/g, '').toUpperCase().slice(0, 6).padEnd(6, '8');
     const payment = {
       code,
       invitationId: inv.id,
@@ -1072,7 +1323,7 @@ class StorageService {
     if (!u) throw new Error('Vui lòng đăng nhập để tự sửa và lưu mẫu thiệp');
     const tplObj = (db.templates || []).find(t => t.id === payload.templateId);
     const pkgs = db.settings?.packages || [];
-    const defaultPkg = pkgs[1] || pkgs[0] || { name: 'Gói Tiêu Chuẩn 3D', price: 229000 };
+    const defaultPkg = pkgs[1] || pkgs[0] || { name: 'Gói Tiêu Chuẩn', price: 189000 };
     const trialDays = tplObj?.isTrialTemplate ? Number(tplObj.trialDays || 1) : (Number(payload.trialDays || 0) || 0);
     const trialCfg = trialDays > 0 ? buildTrialConfig(trialDays) : null;
     const initContent = JSON.parse(JSON.stringify(payload.content || {}));
@@ -1095,7 +1346,7 @@ class StorageService {
         customerPhone: u.phone || '',
         customerEmail: (u.email || '').toLowerCase(),
         packageName: trialCfg ? `Dùng thử miễn phí ${trialDays} ngày` : defaultPkg.name,
-        price: trialCfg ? 0 : Number(defaultPkg.price || 229000),
+        price: trialCfg ? 0 : Number(defaultPkg.price || 189000),
         status: 'trial',
         showWatermark: true,
         notes: trialCfg ? `Khách kích hoạt mẫu dùng thử ${trialDays} ngày (giới hạn chức năng)` : 'Khách tự chọn mẫu và tùy chỉnh nội dung trực tuyến',
@@ -1268,13 +1519,18 @@ class StorageService {
   }
 
   /* ===================== INVITATIONS & MEDIA ===================== */
-  async getInvitation(id, mode = 'guest', token = '') {
+  async getInvitation(id, mode = 'guest', token = '', { blank = false } = {}) {
     if (this.isCloudOnline()) {
-      const url = this.apiUrl(`action=get_invitation&id=${encodeURIComponent(id)}&mode=${encodeURIComponent(mode)}`);
+      const blankQs = blank ? '&blank=1' : '';
+      const url = this.apiUrl(`action=get_invitation&id=${encodeURIComponent(id)}&mode=${encodeURIComponent(mode)}${blankQs}`);
       const headers = this.authHeaders(token ? { 'X-Client-Token': token } : {});
       const res = await fetch(url, { headers, cache: 'no-store' });
       const data = await res.json();
-      if (!res.ok || !data.ok) throw new Error(data.error || 'Không tìm thấy thiệp');
+      if (!res.ok || !data.ok) {
+        const err = new Error(data.error || 'Không tìm thấy thiệp');
+        if (data.paymentRequired) err.paymentRequired = true;
+        throw err;
+      }
       if (data.invitation) this.resolveInvitationMedia(data.invitation);
       if (Array.isArray(data.templates)) data.templates.forEach(t => this.resolveTemplateMedia(t));
       return data;
@@ -1293,10 +1549,26 @@ class StorageService {
       if (!ok) throw new Error('Mã truy cập khách hàng không hợp lệ');
       return { ok: true, invitation: JSON.parse(JSON.stringify(found)), settings: db.settings || {}, templates: db.templates || [] };
     }
+    const status = found.order?.status || 'trial';
+    const isPubliclyActive = status === 'paid' || status === 'deposit' || Boolean(found.trial?.enabled) || this.currentUser?.role === 'admin';
+    if (!isPubliclyActive && !blank) {
+      const err = new Error('Thiệp cưới này đang ở bản nháp chưa thanh toán. Vui lòng hoàn tất thanh toán để kích hoạt đường link gửi khách mời.');
+      err.paymentRequired = true;
+      throw err;
+    }
     const guestSafe = JSON.parse(JSON.stringify(found));
     delete guestSafe.clientToken; delete guestSafe.guests; delete guestSafe.rsvps;
-    guestSafe.order = { status: found.order?.status || 'trial', showWatermark: Boolean(found.order?.showWatermark) };
+    guestSafe.order = { status, showWatermark: Boolean(found.order?.showWatermark) };
     guestSafe.wishes = (guestSafe.wishes || []).filter(w => !w.hidden);
+    if (blank && !isPubliclyActive) {
+      guestSafe.content = {
+        ...(guestSafe.content || {}),
+        heroPhoto: '',
+        gallery: [],
+        gift: { title: 'Hộp Mừng Cưới', subtitle: '', groomBank: {}, brideBank: {} },
+      };
+      guestSafe.wishes = [];
+    }
     return { ok: true, invitation: guestSafe, settings: db.settings || {} };
   }
 

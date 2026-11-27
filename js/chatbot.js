@@ -1,13 +1,13 @@
 /**
- * L'Amour Atelier — Smart Vietnamese FAQ Chatbot Engine + Quick Chat Presets
+ * DaiLo Wedding — Smart Vietnamese FAQ Chatbot Engine + Quick Chat Presets
  * Dùng cho chế độ fallback LocalStorage và hỗ trợ Admin tùy biến quy tắc trả lời tự động.
  */
 
 export const DEFAULT_CHATBOT_CONFIG = {
   enabled: true,
   aiAgentEnabled: true,
-  aiSystemPrompt: 'Bạn là Trợ lý AI tư vấn thiệp cưới của L\'Amour Atelier. Trả lời bằng tiếng Việt lịch sự, ngắn gọn (2–4 câu), rõ ràng, không dùng emoji, tập trung giúp khách chọn mẫu, phối màu hợp mệnh Ngũ Hành, chọn gói 99k/189k/299k/499k hoặc hướng dẫn bấm nút "Nhắn trực tiếp Quản Lý" khi khách muốn trao đổi trực tiếp.',
-  greeting: 'Xin chào! Tôi là Trợ lý AI của L\'Amour Atelier. Bạn cần tư vấn bảng giá, chọn màu hợp mệnh theo năm sinh, dùng thử miễn phí hay đặt thiết kế riêng?',
+  aiSystemPrompt: 'Bạn là Trợ lý AI tư vấn thiệp cưới của DaiLo Wedding. Trả lời bằng tiếng Việt lịch sự, ngắn gọn (2–4 câu), rõ ràng, không dùng emoji, tập trung giúp khách chọn mẫu, phối màu hợp mệnh Ngũ Hành, chọn gói 99k/189k/299k/499k hoặc hướng dẫn bấm nút "Nhắn trực tiếp Quản Lý" khi khách muốn trao đổi trực tiếp.',
+  greeting: 'Xin chào! Tôi là Trợ lý AI của DaiLo Wedding. Bạn cần tư vấn bảng giá, chọn màu hợp mệnh theo năm sinh, dùng thử miễn phí hay đặt thiết kế riêng?',
   fallbackReply: 'Cảm ơn câu hỏi của bạn! Bạn có thể cho mình biết ngày cưới, năm sinh 2 bạn hoặc bấm nút "Nhắn trực tiếp Quản Lý" (nhập SĐT) để Quản Lý hỗ trợ trực tiếp ngay nhé. Hotline/Zalo: 0354 248 177.',
   customerQuickPrompts: [
     'Bảng giá?',
@@ -128,7 +128,7 @@ export function runLocalChatbot(config, userText) {
 
   // Greetings
   if (/^(chao|xin chao|hi|hello|alo|shop oi|ad oi)\b/.test(norm) && norm.length <= 24) {
-    return 'Chào bạn! Mình là Trợ lý AI của L\'Amour Atelier. Bạn đang tìm mẫu thiệp cưới theo phong cách nào, cần báo giá 4 gói (từ 99.000đ) hay muốn xem màu hợp mệnh theo năm sinh của hai bạn ạ?';
+    return 'Chào bạn! Mình là Trợ lý AI của DaiLo Wedding. Bạn đang tìm mẫu thiệp cưới theo phong cách nào, cần báo giá 4 gói (từ 99.000đ) hay muốn xem màu hợp mệnh theo năm sinh của hai bạn ạ?';
   }
 
   // Thank you

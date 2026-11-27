@@ -1,5 +1,5 @@
 /**
- * L'Amour Atelier — Bộ Tổng Hợp Nhạc Nền Cưới + Engine Hiệu Ứng Hoa Rơi / Tim Bay 3D 60fps
+ * DaiLo Wedding — Bộ Tổng Hợp Nhạc Nền Cưới + Engine Hiệu Ứng Hoa Rơi / Tim Bay 3D 60fps
  * Bổ sung: Chiều sâu đa lớp (depth-of-field), gió cuốn tự nhiên, 9 loại hạt nghệ thuật,
  * hiệu ứng bung cánh hoa lễ hội khi mở thiệp / gửi lời chúc, và vệt lấp lánh tương tác khi chạm.
  */

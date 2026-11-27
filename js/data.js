@@ -1,10 +1,10 @@
 /**
- * L'Amour Atelier — Kho Mẫu Thiết Kế Biên Tập, Phong Thủy Ngũ Hành, 12 Cung Hoàng Đạo,
+ * DaiLo Wedding — Kho Mẫu Thiết Kế Biên Tập, Phong Thủy Ngũ Hành, 12 Cung Hoàng Đạo,
  * Hoa Văn SVG & Bộ Dữ Liệu Gợi Ý (Chuẩn Thẩm Mỹ Chuyên Nghiệp — Không Emoji)
  */
 
-import { EDITORIAL_SAMPLE_PHOTOS } from './artwork.js?v=14';
-import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=14';
+import { EDITORIAL_SAMPLE_PHOTOS } from './artwork.js?v=15';
+import { DEFAULT_CHATBOT_CONFIG } from './chatbot.js?v=15';
 
 export const FONT_OPTIONS = [
   { id: 'Cormorant Garamond', label: 'Cormorant Garamond (Biên tập hoàng gia)', stack: "'Cormorant Garamond', Georgia, serif", kind: 'heading' },
@@ -1123,8 +1123,10 @@ export const COPY_SUGGESTIONS = {
   ],
 };
 
-export function createInvitationFromTemplate(templateId, overrides = {}) {
-  const tpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0];
+export function createInvitationFromTemplate(templateIdOrObj, overrides = {}) {
+  const isObj = Boolean(templateIdOrObj && typeof templateIdOrObj === 'object');
+  const templateId = isObj ? templateIdOrObj.id : templateIdOrObj;
+  const tpl = TEMPLATES.find(t => t.id === templateId) || (isObj && templateIdOrObj.design ? templateIdOrObj : TEMPLATES[0]);
   const uid = overrides.id || ('thiep-' + Math.random().toString(36).slice(2, 8));
   const token = overrides.clientToken || ('kh_' + Math.random().toString(36).slice(2, 10));
   const trialDays = Number(overrides.trialDays ?? (tpl.isTrialTemplate ? tpl.trialDays : 0)) || 0;
@@ -1396,9 +1398,9 @@ export function createInitialSeedDb() {
   inv2.content.lunarDate = 'Tức ngày 09 tháng 12 năm Bính Ngọ';
 
   return {
-    version: 9,
+    version: 15,
     settings: {
-      brandName: "L'Amour Atelier",
+      brandName: 'DaiLo Wedding',
       tagline: 'Thiết kế thiệp cưới online mang dấu ấn riêng — bìa ảnh mờ cuốn hút, hoa văn ép kim, hiệu ứng 3D mượt mà và phối màu chuẩn Ngũ Hành.',
       hotline: '0354 248 177',
       phoneRaw: '0354248177',
@@ -1424,7 +1426,7 @@ export function createInitialSeedDb() {
         date: '2026-11-28',
         timeSlot: '19:30',
         channel: 'Zalo Call',
-        service: 'Tư vấn phối màu hợp mệnh Ngũ Hành & Gói 369k',
+        service: 'Tư vấn phối màu hợp mệnh Ngũ Hành & Gói 299k',
         note: 'Chú rể 1995, cô dâu 1998, muốn phong cách sang trọng tông đỏ rượu hoặc xanh lục bảo.',
         status: 'confirmed',
         createdAt: new Date(Date.now() - 86400000).toISOString(),
@@ -1438,7 +1440,7 @@ export function createInitialSeedDb() {
         date: '2026-11-29',
         timeSlot: '14:00',
         channel: 'Nhắn tin Zalo',
-        service: 'Thiết kế riêng theo bộ ảnh cưới Đà Lạt (Gói 599k)',
+        service: 'Thiết kế riêng theo bộ ảnh cưới Đà Lạt (Gói 499k)',
         note: 'Cần hoàn thiện trước ngày 10/12 để gửi khách mời.',
         status: 'pending',
         createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
@@ -1470,7 +1472,7 @@ export function createInitialSeedDb() {
           {
             id: 'm_d3',
             sender: 'customer',
-            text: 'Gói 369k rất hợp lý, shop tư vấn giúp mình mẫu xanh lục bảo nhé!',
+            text: 'Gói 299k rất hợp lý, shop tư vấn giúp mình mẫu xanh lục bảo nhé!',
             createdAt: new Date(Date.now() - 1800000).toISOString(),
           },
         ],
@@ -1486,9 +1488,9 @@ export function createInitialSeedDb() {
         phone: '0901 234 567',
         templateId: 'nhung-do-co-dien',
         templateName: 'Nhung Đỏ Cung Điện',
-        packageName: 'Gói Cao Cấp Phong Thủy',
-        amount: 369000,
-        transferCode: 'THIEP NHUNGDO 0901234567',
+        packageName: 'Gói Cao Cấp',
+        amount: 299000,
+        transferCode: 'DAILO901234',
         message: 'Đã chuyển khoản MB Bank 0354248177, nhờ shop mở khóa bản chính thức.',
         status: 'paid',
         createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),

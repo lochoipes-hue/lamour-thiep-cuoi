@@ -1,5 +1,5 @@
 /**
- * L'Amour Atelier — Trình Hiển Thị Thiệp Cưới Biên Tập Cao Cấp
+ * DaiLo Wedding — Trình Hiển Thị Thiệp Cưới Biên Tập Cao Cấp
  * Bìa ảnh nền mờ cuốn hút + Hoa văn chạm khắc ép kim + Phong bì nhung 3D + Coverflow 3D + Bao Lì Xì
  * Tối giản icon tuyệt đối — Không icon thừa sơ sài, ưu tiên nghệ thuật chữ & ảnh.
  */
@@ -12,7 +12,7 @@ import {
   getOrnamentCornerSvg,
   getOrnamentDividerSvg,
   getCrestBadgeSvg,
-} from './data.js?v=14';
+} from './data.js?v=15';
 import {
   getBotanicalSpraySvg,
   getCoverFiligreeFrameSvg,
@@ -20,9 +20,9 @@ import {
   getWaxSealSvg,
   getFleuronDividerSvg,
   resolveBackdropUrl,
-} from './artwork.js?v=14';
-import { icon } from './icons.js?v=14';
-import { musicEngine, ParticleCanvasController } from './audio-fx.js?v=14';
+} from './artwork.js?v=15';
+import { icon } from './icons.js?v=15';
+import { musicEngine, ParticleCanvasController } from './audio-fx.js?v=15';
 
 export function escapeHtml(str) {
   return String(str ?? '')
@@ -143,7 +143,7 @@ function bankNameByCode(code) {
 function renderBlankFrame(label, sublabel = 'Không gian ảnh cặp đôi') {
   return `
     <div class="inv-blank-frame">
-      <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:15px;color:var(--inv-ornament);margin-bottom:6px;letter-spacing:1px;">Atelier Frame</div>
+      <div style="font-family:'Cormorant Garamond',serif;font-style:italic;font-size:15px;color:var(--inv-ornament);margin-bottom:6px;letter-spacing:1px;">DaiLo Frame</div>
       <strong>${escapeHtml(label)}</strong>
       <small>${escapeHtml(sublabel)}</small>
     </div>
@@ -185,7 +185,7 @@ function buildQrImage(bank, blankMode, label) {
     `;
   }
   const url = `https://img.vietqr.io/image/${encodeURIComponent(bank.bankCode)}-${encodeURIComponent(bank.accountNo)}-compact2.png?accountName=${encodeURIComponent(bank.accountName || '')}`;
-  return `<img src="${url}" alt="VietQR ${escapeHtml(label)}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'font-size:11px;padding:12px;color:#555;\\'>Mã QR Ngân hàng<br><b>${escapeHtml(bank.bankCode)}</b><br>${escapeHtml(bank.accountNo)}</div>'" />`;
+  return `<img src="${url}" alt="VietQR ${escapeHtml(label)}" loading="lazy" data-qr-fallback-bank="${escapeHtml(bank.bankCode)}" data-qr-fallback-acc="${escapeHtml(bank.accountNo)}" />`;
 }
 
 export class InvitationRenderer {
@@ -196,7 +196,7 @@ export class InvitationRenderer {
       editable: false,
       blankMode: false,
       guestName: '',
-      brandName: "L'Amour Atelier",
+      brandName: 'DaiLo Wedding',
       skipIntro: false,
       onSelectSection: null,
       onGuestSubmit: null,
@@ -523,7 +523,7 @@ export class InvitationRenderer {
         surfaceClass = 'surface-transparent';
         showCorners = false;
         const heroVisual = (!this.options.blankMode && c.heroPhoto)
-          ? `<img src="${escapeHtml(c.heroPhoto)}" alt="Ảnh cưới" data-lightbox-src="${escapeHtml(c.heroPhoto)}" onerror="this.parentElement.innerHTML='${escapeHtml(renderBlankFrame('Ảnh Bìa Cưới 3:4', 'Ảnh bìa chính của cặp đôi'))}'" />`
+          ? `<img src="${escapeHtml(c.heroPhoto)}" alt="Ảnh cưới" data-lightbox-src="${escapeHtml(c.heroPhoto)}" data-fallback-label="Ảnh Bìa Cưới 3:4" data-fallback-sub="Ảnh bìa chính của cặp đôi" />`
           : renderBlankFrame('Ảnh Bìa Cưới 3:4', this.options.blankMode ? 'Chế độ Mẫu Trống — Không lộ ảnh thật' : 'Tải ảnh bìa trong mục Nội dung');
 
         inner = `
@@ -623,7 +623,7 @@ export class InvitationRenderer {
               return `
                 <div class="coverflow-slide ${posClass}" data-cf-idx="${idx}">
                   ${src
-                    ? `<img src="${escapeHtml(src)}" alt="Ảnh cưới ${idx + 1}" loading="lazy" data-lightbox-src="${escapeHtml(src)}" />`
+                    ? `<img src="${escapeHtml(src)}" alt="Ảnh cưới ${idx + 1}" loading="lazy" data-lightbox-src="${escapeHtml(src)}" data-fallback-label="Ảnh Album 0${idx + 1}" data-fallback-sub="Không gian ảnh cưới" />`
                     : renderBlankFrame(`Ảnh Album 0${idx + 1}`, this.options.blankMode ? 'Khung trình diễn 3D' : 'Thêm ảnh trong mục Album')}
                 </div>
               `;
@@ -1050,6 +1050,29 @@ export class InvitationRenderer {
         if (!txt || txt.includes('X')) { this.toast('Đang ở chế độ mẫu trống — không có STK thật', 'info'); return; }
         navigator.clipboard?.writeText(txt).then(() => this.toast(`Đã sao chép STK: ${txt}`, 'success')).catch(() => this.toast(`STK: ${txt}`, 'info'));
       });
+    });
+
+    stage.querySelectorAll('img[data-fallback-label]').forEach(img => {
+      const applyFallback = () => {
+        if (img.parentElement) {
+          img.parentElement.innerHTML = renderBlankFrame(
+            img.dataset.fallbackLabel || 'Ảnh Bìa Cưới 3:4',
+            img.dataset.fallbackSub || 'Không gian ảnh cặp đôi'
+          );
+        }
+      };
+      img.addEventListener('error', applyFallback, { once: true });
+      if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) applyFallback();
+    });
+
+    stage.querySelectorAll('img[data-qr-fallback-bank]').forEach(img => {
+      const applyQrFallback = () => {
+        if (img.parentElement) {
+          img.parentElement.innerHTML = `<div style="font-size:11px;padding:12px;color:#555;">Mã QR Ngân hàng<br><b>${escapeHtml(img.dataset.qrFallbackBank || '')}</b><br>${escapeHtml(img.dataset.qrFallbackAcc || '')}</div>`;
+        }
+      };
+      img.addEventListener('error', applyQrFallback, { once: true });
+      if (img.complete && img.naturalWidth === 0 && img.getAttribute('src')) applyQrFallback();
     });
 
     stage.querySelectorAll('[data-lightbox-src]').forEach(img => {

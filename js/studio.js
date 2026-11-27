@@ -1,5 +1,5 @@
 /**
- * L'Amour Atelier — Trình Soạn Thiệp 3 Cột Tinh Gọn Cao Cấp
+ * DaiLo Wedding — Trình Soạn Thiệp 3 Cột Tinh Gọn Cao Cấp
  * Loại bỏ toàn bộ icon thừa trên tiêu đề và nút văn bản, bổ sung trình chọn Ảnh Nền Mờ Bìa & Hoa Văn Ép Kim.
  */
 
@@ -22,12 +22,12 @@ import {
   getTrialState,
   analyzeCoupleFengShui,
   generateHarmonyMix,
-} from './data.js?v=14';
-import { COVER_BACKDROPS, resolveBackdropUrl } from './artwork.js?v=14';
-import { InvitationRenderer, escapeHtml } from './renderer.js?v=14';
-import { musicEngine } from './audio-fx.js?v=14';
-import { storage } from './storage.js?v=14';
-import { icon } from './icons.js?v=14';
+} from './data.js?v=15';
+import { COVER_BACKDROPS, resolveBackdropUrl } from './artwork.js?v=15';
+import { InvitationRenderer, escapeHtml } from './renderer.js?v=15';
+import { musicEngine } from './audio-fx.js?v=15';
+import { storage } from './storage.js?v=15';
+import { icon } from './icons.js?v=15';
 
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
@@ -158,7 +158,7 @@ export class StudioEditor {
               ? `<button type="button" class="btn btn-outline btn-sm" data-action="back">${icon('arrowLeft', 14)} Quản Lý</button>`
               : this.onBack
                 ? `<button type="button" class="btn btn-outline btn-sm" data-action="back">${icon('arrowLeft', 14)} Tài Khoản</button>`
-                : `<div class="brand-monogram" style="width:30px;height:30px;font-size:16px;">L</div>`}
+                : `<div class="brand-monogram" style="width:30px;height:30px;font-size:13px;">DL</div>`}
             <input class="studio-title-input" type="text" data-bind-title value="${escapeHtml(this.invitation.title)}" placeholder="Tên thiệp cưới của bạn..." />
           </div>
           <div class="studio-topbar-center">
@@ -176,7 +176,6 @@ export class StudioEditor {
           </div>
           <div class="studio-topbar-right">
             ${isAdmin && !this.isTemplateEditor ? `<button type="button" class="btn btn-outline btn-sm" data-action="save-template">Lưu Thành Mẫu</button>` : ''}
-            ${!this.isTemplateEditor ? `<button type="button" class="btn btn-outline btn-sm" data-action="share-links">Lấy Link</button>` : ''}
             <button type="button" class="btn ${!isAdmin && !isPaid ? 'btn-outline' : 'btn-primary'} btn-sm" data-action="save-all">${this.isTemplateEditor ? 'Lưu Mẫu Thiệp' : 'Lưu Thiệp'}</button>
             ${!isAdmin ? `<button type="button" class="btn ${isPaid ? 'btn-outline' : 'btn-gold'} btn-sm" data-action="go-checkout">${isPaid ? 'Xem Trang Bàn Giao' : 'Thanh Toán Ngay'}</button>` : ''}
           </div>
@@ -262,8 +261,6 @@ export class StudioEditor {
       });
     });
 
-    root.querySelector('[data-action="share-links"]')?.addEventListener('click', () => this.onOpenShareModal?.(this.invitation, this.mode));
-
     root.querySelectorAll('[data-action="go-checkout"]').forEach(btn => {
       btn.addEventListener('click', () => this.openCheckoutFlow());
     });
@@ -343,7 +340,7 @@ export class StudioEditor {
       editable: true,
       blankMode: this.blankPreview,
       skipIntro: true,
-      brandName: this.settings.brandName || "L'Amour Atelier",
+      brandName: this.settings.brandName || 'DaiLo Wedding',
       onToast: this.onToast,
       onSelectSection: sectionType => this.handlePreviewSectionClick(sectionType),
     });
@@ -911,7 +908,7 @@ export class StudioEditor {
             <label>Ảnh Bìa Chính (Trong Phong Bì Nhung)</label>
             ${c.heroPhoto ? `
               <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;padding:7px;background:#fff;border:1px solid var(--ui-border);border-radius:10px;">
-                <img src="${escapeHtml(c.heroPhoto)}" alt="Ảnh bìa" style="width:48px;height:64px;object-fit:cover;border-radius:6px;" />
+                <img src="${escapeHtml(storage.resolveMediaUrl(c.heroPhoto))}" alt="Ảnh bìa" style="width:48px;height:64px;object-fit:cover;border-radius:6px;" />
                 <div style="flex:1;font-size:11.5px;color:var(--ui-muted);">Ảnh bìa cưới hiện tại của bạn</div>
                 <button type="button" class="btn btn-danger btn-xs" data-clear-hero>Xóa ảnh</button>
               </div>
@@ -1000,7 +997,7 @@ export class StudioEditor {
           <div class="thumb-strip">
             ${(c.gallery || []).map((src, idx) => `
               <div class="thumb-item" style="position:relative;">
-                <img src="${escapeHtml(src)}" alt="Album ${idx + 1}" />
+                <img src="${escapeHtml(storage.resolveMediaUrl(src))}" alt="Album ${idx + 1}" />
                 <button type="button" class="thumb-del" data-del-photo="${idx}" title="Xóa ảnh">${icon('x', 12)}</button>
                 <div style="position:absolute;left:3px;right:3px;bottom:3px;display:flex;gap:2px;justify-content:space-between;">
                   <button type="button" class="btn btn-xs" style="padding:1px 4px;font-size:9.5px;background:rgba(20,16,18,0.78);color:#fff;border:none;" data-move-photo="${idx}:-1" ${idx === 0 ? 'disabled' : ''} title="Dịch trái">${icon('chevronLeft', 10)}</button>
@@ -1226,16 +1223,20 @@ export class StudioEditor {
         }
       }
       this.onToast(`Đang tải ${allowedFiles.length} ảnh vào Album...`, 'info');
+      let uploadedCount = 0;
       for (const f of allowedFiles) {
         try {
           const url = await storage.uploadMedia(f, { invId: this.invitation.id, clientToken: this.clientToken });
           this.invitation.content.gallery.push(url);
+          uploadedCount++;
         } catch (err) { this.onToast(err.message || 'Lỗi tải ảnh', 'error'); }
       }
-      this.pushHistory();
-      this.renderInspector();
-      this.refreshPreview();
-      this.onToast('Đã cập nhật Album ảnh', 'success');
+      if (uploadedCount > 0) {
+        this.pushHistory();
+        this.renderInspector();
+        this.refreshPreview();
+        this.onToast(`Đã cập nhật ${uploadedCount} ảnh vào Album`, 'success');
+      }
     });
     pane.querySelectorAll('[data-del-photo]').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -1348,7 +1349,7 @@ export class StudioEditor {
             <label>Link file nhạc (.mp3) hoặc tải lên</label>
             <input class="input" data-music="customUrl" value="${escapeHtml(m.customUrl || '')}" placeholder="https://.../nhac-cuoi.mp3" style="margin-bottom:6px;" />
             <label class="upload-drop" style="width:100%;padding:8px;">
-              Tải file MP3 từ máy (tối đa 12MB)
+              Tải file MP3 từ máy (tối đa 4MB)
               <input type="file" accept="audio/*" style="display:none;" data-upload-audio />
             </label>
           </div>
@@ -1529,8 +1530,9 @@ export class StudioEditor {
     const guests = this.invitation.guests || [];
     const rsvps = this.invitation.rsvps || [];
     const totalAttending = rsvps.filter(r => r.attendance === 'yes').reduce((acc, r) => acc + (Number(r.guestsCount) || 1), 0);
+    const isPaid = this.invitation.order?.status === 'paid';
     const trialState = this.mode === 'client' ? getTrialState(this.invitation) : { active: false, limits: null };
-    const guestLocked = trialState.active && !trialState.limits?.allowGuestPersonalLinks;
+    const guestLocked = this.mode === 'client' && !isPaid;
 
     return `
       <h4 class="inspector-title"><span>Khách Mời &amp; Xác Nhận RSVP</span></h4>
@@ -1543,11 +1545,11 @@ export class StudioEditor {
 
       ${guestLocked ? `
         <div class="inspector-box" style="background:#fdf6e7;border-color:#e5cfa0;">
-          <div style="font-size:12.5px;font-weight:700;color:#7b4f10;margin-bottom:5px;">Giới Hạn Bản Dùng Thử ${trialState.days} Ngày</div>
+          <div style="font-size:12.5px;font-weight:700;color:#7b4f10;margin-bottom:5px;">${trialState.active ? `Giới Hạn Bản Dùng Thử ${trialState.days} Ngày` : 'Mở Khóa Sau Khi Thanh Toán'}</div>
           <p style="font-size:12px;color:#6e5630;margin:0 0 10px;line-height:1.55;">
-            Tạo link mang tên riêng từng khách mời, mẫu tin mời Zalo hàng loạt và xuất file Excel RSVP là tính năng của gói chính thức (tối đa ${trialState.limits.maxGuests} khách nháp ở bản thử).
+            Tạo đường link gửi khách mời mang tên riêng, mẫu tin nhắn mời Zalo hàng loạt và xuất file Excel RSVP sẽ tự động mở khóa ngay sau khi bạn thanh toán kích hoạt thiệp chính thức.
           </p>
-          <button type="button" class="btn btn-gold btn-sm" style="width:100%;" data-guest-upgrade>Nâng Cấp Mở Khóa Tạo Link Khách Không Giới Hạn</button>
+          <button type="button" class="btn btn-gold btn-sm" style="width:100%;" data-guest-upgrade>Thanh Toán Mở Khóa Gửi Khách Ngay</button>
         </div>
       ` : `
       <div class="inspector-box">
@@ -1795,7 +1797,7 @@ export class StudioEditor {
       <div class="inspector-box" style="background:var(--ui-brand-soft);border-color:rgba(123,28,38,0.2);">
         <div style="display:flex;gap:10px;align-items:center;">
           ${inv.content?.heroPhoto
-            ? `<img src="${escapeHtml(inv.content.heroPhoto)}" alt="" style="width:48px;height:62px;object-fit:cover;border-radius:8px;border:1px solid #fff;" />`
+            ? `<img src="${escapeHtml(storage.resolveMediaUrl(inv.content.heroPhoto))}" alt="" style="width:48px;height:62px;object-fit:cover;border-radius:8px;border:1px solid #fff;" />`
             : `<div style="width:48px;height:62px;border-radius:8px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ui-brand);font-weight:700;">MẪU</div>`}
           <div style="flex:1;min-width:0;">
             <div style="font-size:13px;font-weight:700;color:var(--ui-brand);">${escapeHtml(inv.content?.groomName || 'Chú Rể')} &amp; ${escapeHtml(inv.content?.brideName || 'Cô Dâu')}</div>

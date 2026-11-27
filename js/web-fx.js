@@ -1,5 +1,5 @@
 /**
- * L'Amour Atelier — Luxury Web Interaction FX Engine
+ * DaiLo Wedding — Luxury Web Interaction FX Engine
  * - Hiệu ứng gợn sáng vàng hồng & hạt bụi ánh kim nhẹ khi click bất kỳ nút / thẻ nào
  * - Hiệu ứng nghiêng 3D + vệt ánh sáng champagne khi rê chuột qua poster mẫu & thẻ giá
  * - Hiệu ứng xuất hiện mượt mà theo cuộn (Scroll Reveal Stagger)
