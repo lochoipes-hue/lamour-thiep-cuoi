@@ -178,7 +178,7 @@ export class StudioEditor {
             ${isAdmin && !this.isTemplateEditor ? `<button type="button" class="btn btn-outline btn-sm" data-action="save-template">Lưu Thành Mẫu</button>` : ''}
             ${!this.isTemplateEditor ? `<button type="button" class="btn btn-outline btn-sm" data-action="share-links">Lấy Link</button>` : ''}
             <button type="button" class="btn ${!isAdmin && !isPaid ? 'btn-outline' : 'btn-primary'} btn-sm" data-action="save-all">${this.isTemplateEditor ? 'Lưu Mẫu Thiệp' : 'Lưu Thiệp'}</button>
-            ${!isAdmin ? `<button type="button" class="btn ${isPaid ? 'btn-outline' : 'btn-gold'} btn-sm" data-action="go-checkout">${isPaid ? 'Nhận Sản Phẩm &amp; QR' : 'Hoàn Tất &amp; Chuyển Tiền'}</button>` : ''}
+            ${!isAdmin ? `<button type="button" class="btn ${isPaid ? 'btn-outline' : 'btn-gold'} btn-sm" data-action="go-checkout">${isPaid ? 'Xem Trang Bàn Giao' : 'Thanh Toán Ngay'}</button>` : ''}
           </div>
         </header>
 
@@ -312,7 +312,7 @@ export class StudioEditor {
     }
   }
 
-  async openCheckoutFlow() {
+  async openCheckoutFlow(pkgIdx = this.selectedPkgIdx) {
     if (this.onGoCheckoutPage) {
       try {
         if (!this.saving) {
@@ -326,7 +326,7 @@ export class StudioEditor {
       }
       musicEngine.stop();
       this.destroy();
-      this.onGoCheckoutPage(deepClone(this.invitation));
+      this.onGoCheckoutPage(deepClone(this.invitation), Number.isFinite(Number(pkgIdx)) ? Number(pkgIdx) : 1);
       return;
     }
     this.activeTab = 'checkout';
@@ -1751,25 +1751,16 @@ export class StudioEditor {
     pane.querySelectorAll('[data-perm]').forEach(cb => { cb.addEventListener('change', () => { this.invitation.permissions[cb.dataset.perm] = cb.checked; }); });
   }
 
-  /* ================= TAB 8: THANH TOÁN TRỰC TIẾP MẪU ĐÃ CHỌN (KHÁCH HÀNG) ================= */
+  /* ================= TAB 8: THANH TOÁN VIETQR TỰ ĐỘNG (KHÁCH HÀNG) ================= */
   tplCheckoutTab() {
     const inv = this.invitation;
     const s = this.settings || {};
     const pkgs = s.packages || [];
-    const curPkg = pkgs[this.selectedPkgIdx] || pkgs[0] || { name: 'Gói Tiêu Chuẩn 3D', price: 229000, photoLimit: '30 ảnh HD', duration: '18 tháng' };
+    const curPkg = pkgs[this.selectedPkgIdx] || pkgs[0] || { name: 'Gói Tiêu Chuẩn', price: 189000, photoLimit: '20 ảnh HD', duration: 'Đầy đủ lời chúc & QR' };
     const isPaid = inv.order?.status === 'paid';
     const photoCount = (inv.content?.gallery?.length || 0) + (inv.content?.heroPhoto ? 1 : 0);
-    const bankCode = s.paymentBankCode || 'MB';
-    const bankNo = (s.paymentAccountNo || '0354248177').replace(/\s+/g, '');
-    const bankName = s.paymentBankName || 'MB Bank — Ngân hàng Quân Đội';
     const hotline = s.hotline || '0354 248 177';
     const zaloUrl = s.zaloUrl || 'https://zalo.me/0354248177';
-    const shortId = (inv.id || 'THIEP').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 10);
-    const cleanPhone = (this.checkoutCustomerPhone || inv.order?.customerPhone || 'SDT').replace(/\D/g, '').slice(-10) || 'SDT';
-    const memo = `THIEP ${shortId} ${cleanPhone}`;
-    const qs = new URLSearchParams({ amount: String(curPkg.price || 0), addInfo: memo });
-    if (s.paymentAccountName) qs.set('accountName', s.paymentAccountName);
-    const qrUrl = `https://img.vietqr.io/image/${encodeURIComponent(bankCode)}-${encodeURIComponent(bankNo)}-compact2.png?${qs.toString()}`;
 
     if (isPaid) {
       return `
@@ -1779,14 +1770,15 @@ export class StudioEditor {
           <p style="font-size:12px;color:#275a3e;margin:0 0 10px;line-height:1.55;">
             Mẫu thiệp <strong>${escapeHtml(inv.title)}</strong> đã thanh toán đủ (${escapeHtml(inv.order?.packageName || '')}) và đã tắt hoàn toàn dải băng Bản Xem Thử. Bạn có thể tiếp tục sửa nội dung, ảnh cưới và gửi link cho khách mời bất cứ lúc nào.
           </p>
-          <button type="button" class="btn btn-primary btn-sm" style="width:100%;" data-co-open-links>Mở Đường Link Gửi Khách Mời</button>
+          <button type="button" class="btn btn-primary btn-sm" style="width:100%;margin-bottom:8px;" data-co-open-full>Mở Trang Bàn Giao Thiệp</button>
+          <button type="button" class="btn btn-outline btn-sm" style="width:100%;" data-co-open-links>Mở Đường Link Gửi Khách Mời</button>
         </div>
       `;
     }
 
     const trialState = getTrialState(inv);
     return `
-      <h4 class="inspector-title"><span>${trialState.active ? 'Nâng Cấp Gói Chính Thức' : 'Thanh Toán Mẫu Đã Chọn'}</span></h4>
+      <h4 class="inspector-title"><span>${trialState.active ? 'Nâng Cấp Gói Chính Thức' : 'Thanh Toán & Kích Hoạt Thiệp'}</span></h4>
 
       ${trialState.active ? `
         <div class="inspector-box" style="background:#fdf6e7;border-color:#e5cfa0;">
@@ -1808,18 +1800,13 @@ export class StudioEditor {
           <div style="flex:1;min-width:0;">
             <div style="font-size:13px;font-weight:700;color:var(--ui-brand);">${escapeHtml(inv.content?.groomName || 'Chú Rể')} &amp; ${escapeHtml(inv.content?.brideName || 'Cô Dâu')}</div>
             <div style="font-size:11.5px;color:var(--ui-text);">Mẫu: <strong>${escapeHtml(inv.templateName || inv.templateId || 'Đã chọn')}</strong></div>
-            <div style="font-size:11px;color:var(--ui-muted);margin-top:2px;">Đang có ${photoCount} ảnh đã tải • Tự động lưu mọi nội dung bạn vừa sửa</div>
+            <div style="font-size:11px;color:var(--ui-muted);margin-top:2px;">Đang có ${photoCount} ảnh đã tải • Tự động lưu mọi nội dung trước khi mở mã QR</div>
           </div>
         </div>
-        ${inv.order?.paymentSubmittedAt ? `
-          <div style="margin-top:9px;padding:7px 9px;border-radius:8px;background:#fff;font-size:11.5px;color:#8a5a12;border:1px solid #e6d2a2;">
-            Bạn đã gửi xác nhận chuyển khoản (Mã: <strong>${escapeHtml(inv.order.transferCode || '')}</strong>). Studio đang đối soát MB Bank và mở khóa VIP ngay trong ít phút!
-          </div>
-        ` : ''}
       </div>
 
       <div class="inspector-box">
-        <h5>1. Chọn Gói Dịch Vụ Cho Thiệp Này</h5>
+        <h5>Chọn Gói Dịch Vụ</h5>
         ${pkgs.map((p, idx) => {
           const active = idx === this.selectedPkgIdx;
           return `
@@ -1839,117 +1826,26 @@ export class StudioEditor {
         ` : ''}
       </div>
 
-      <div class="inspector-box" style="text-align:center;">
-        <h5 style="text-align:left;">2. Quét Mã VietQR MB Bank Thanh Toán</h5>
-        <img id="co-qr-img" src="${escapeHtml(qrUrl)}" alt="VietQR MB Bank" style="width:200px;max-width:100%;border-radius:10px;border:1px solid var(--ui-border);background:#fff;padding:5px;margin:4px auto 10px;display:block;" />
-        <div style="font-size:12.5px;line-height:1.6;margin-bottom:8px;">
-          <div><strong>${escapeHtml(bankName)}</strong></div>
-          <div>STK: <strong style="color:var(--ui-brand);font-size:14px;">${escapeHtml(bankNo)}</strong></div>
-          ${s.paymentAccountName ? `<div>Chủ TK: <strong>${escapeHtml(s.paymentAccountName)}</strong></div>` : ''}
-          <div>Số tiền: <strong style="color:var(--ui-success);font-size:14px;">${Number(curPkg.price || 0).toLocaleString('vi-VN')}đ</strong></div>
-          <div style="font-size:11.5px;color:var(--ui-muted);">Nội dung CK: <strong id="co-qr-memo" style="color:var(--ui-text);">${escapeHtml(memo)}</strong></div>
+      <div class="inspector-box">
+        <div style="font-size:12px;color:var(--ui-muted);line-height:1.6;margin-bottom:12px;">
+          Gói đang chọn: <strong style="color:var(--ui-text);">${escapeHtml(curPkg.name)}</strong> — <strong style="color:var(--ui-brand);">${Number(curPkg.price || 0).toLocaleString('vi-VN')}đ</strong>.<br />
+          Bấm <strong>Thanh Toán Ngay</strong> để tạo mã QR VietQR MB Bank riêng cho thiệp này. Sau khi chuyển khoản, hệ thống sẽ <strong>tự động mở khóa và chuyển sang Trang Bàn Giao Thiệp</strong> sau 3–5 giây (không cần bấm xác nhận).
         </div>
-        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
-          <button type="button" class="btn btn-outline btn-xs" data-co-copy="${escapeHtml(bankNo)}">Sao chép STK</button>
-          <button type="button" class="btn btn-outline btn-xs" data-co-copy="${escapeHtml(memo)}">Sao chép Nội dung CK</button>
-        </div>
-      </div>
-
-      <form class="inspector-box" id="studio-checkout-form">
-        <h5>3. Xác Nhận Thanh Toán &amp; Lưu Thiệp</h5>
-        <div class="form-group"><label>Họ tên của bạn *</label><input class="input" name="name" required value="${escapeHtml(this.checkoutCustomerName)}" placeholder="VD: Minh Quân" /></div>
-        <div class="form-group"><label>SĐT / Zalo nhận kích hoạt (chỉ nhập số) *</label><input class="input" type="tel" inputmode="numeric" pattern="[0-9]{9,11}" maxlength="11" name="phone" required value="${escapeHtml((this.checkoutCustomerPhone || '').replace(/\D/g, ''))}" placeholder="09xxxxxxxx" /></div>
-        <div class="form-group"><label>Ghi chú cho Studio (tùy chọn)</label><textarea class="textarea" rows="2" name="note" placeholder="VD: Đã chuyển khoản MB Bank, nhờ shop kích hoạt giúp...">${escapeHtml(this.checkoutNote)}</textarea></div>
-        <button type="submit" class="btn btn-primary" style="width:100%;padding:11px;margin-bottom:8px;" id="btn-co-submit">Tôi Đã Chuyển Tiền — Nhận Sản Phẩm Ngay</button>
-        <button type="button" class="btn btn-gold btn-sm" style="width:100%;margin-bottom:8px;" data-co-open-full>Mở Trang Chuyển Tiền Toàn Màn Hình</button>
+        <button type="button" class="btn btn-primary" style="width:100%;padding:12px;font-size:14px;margin-bottom:8px;" data-co-open-full>Thanh Toán Ngay</button>
         <a class="btn btn-outline btn-sm" style="width:100%;" href="${escapeHtml(zaloUrl)}" target="_blank" rel="noopener">Hỗ trợ qua Zalo (${escapeHtml(hotline)})</a>
-      </form>
+      </div>
     `;
   }
 
   bindCheckoutTab(pane) {
     pane.querySelector('[data-co-open-links]')?.addEventListener('click', () => this.onOpenShareModal?.(this.invitation, this.mode));
-    pane.querySelector('[data-co-open-full]')?.addEventListener('click', () => this.openCheckoutFlow());
+    pane.querySelector('[data-co-open-full]')?.addEventListener('click', () => this.openCheckoutFlow(this.selectedPkgIdx));
     pane.querySelectorAll('[data-co-pkg]').forEach(el => {
       el.addEventListener('click', () => {
         this.selectedPkgIdx = Number(el.dataset.coPkg);
         this.renderInspector();
       });
     });
-    pane.querySelectorAll('[data-co-copy]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        navigator.clipboard?.writeText(btn.dataset.coCopy).then(() => this.onToast('Đã sao chép thông tin chuyển khoản', 'success'));
-      });
-    });
-    const form = pane.querySelector('#studio-checkout-form');
-    if (form) {
-      form.querySelector('input[name="name"]')?.addEventListener('input', e => { this.checkoutCustomerName = e.target.value; });
-      form.querySelector('input[name="phone"]')?.addEventListener('input', e => {
-        e.target.value = e.target.value.replace(/\D/g, '').slice(0, 11);
-        this.checkoutCustomerPhone = e.target.value;
-        const shortId = (this.invitation.id || 'THIEP').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 10);
-        const cleanPhone = (this.checkoutCustomerPhone || 'SDT').replace(/\D/g, '').slice(-10) || 'SDT';
-        const memo = `THIEP ${shortId} ${cleanPhone}`;
-        const memoEl = pane.querySelector('#co-qr-memo');
-        if (memoEl) memoEl.textContent = memo;
-        const pkgs = this.settings.packages || [];
-        const curPkg = pkgs[this.selectedPkgIdx] || pkgs[0] || { price: 229000 };
-        const bankCode = this.settings.paymentBankCode || 'MB';
-        const bankNo = (this.settings.paymentAccountNo || '0354248177').replace(/\s+/g, '');
-        const qs = new URLSearchParams({ amount: String(curPkg.price || 0), addInfo: memo });
-        if (this.settings.paymentAccountName) qs.set('accountName', this.settings.paymentAccountName);
-        const img = pane.querySelector('#co-qr-img');
-        if (img) img.src = `https://img.vietqr.io/image/${encodeURIComponent(bankCode)}-${encodeURIComponent(bankNo)}-compact2.png?${qs.toString()}`;
-      });
-      form.querySelector('textarea[name="note"]')?.addEventListener('input', e => { this.checkoutNote = e.target.value; });
-
-      form.addEventListener('submit', async e => {
-        e.preventDefault();
-        if (this.submittingCheckout) return;
-        this.submittingCheckout = true;
-        const btn = pane.querySelector('#btn-co-submit');
-        if (btn) { btn.disabled = true; btn.textContent = 'Đang lưu & gửi thanh toán...'; }
-        try {
-          // 1. Auto-save ALL customer's photo & section edits first!
-          await this.onSave?.(deepClone(this.invitation));
-
-          // 2. Submit QR payment order linked directly to this exact invitation!
-          const pkgs = this.settings.packages || [];
-          const curPkg = pkgs[this.selectedPkgIdx] || pkgs[0] || { name: 'Gói Tiêu Chuẩn 3D', price: 229000 };
-          const shortId = (this.invitation.id || 'THIEP').replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 10);
-          const cleanPhone = (this.checkoutCustomerPhone || 'SDT').replace(/\D/g, '').slice(-10) || 'SDT';
-          const transferCode = `THIEP ${shortId} ${cleanPhone}`;
-
-          await this.onCheckoutOrder?.({
-            kind: 'qr_order',
-            invitationId: this.invitation.id,
-            packageId: curPkg.id || '',
-            name: this.checkoutCustomerName.trim(),
-            phone: this.checkoutCustomerPhone.trim(),
-            email: this.currentUser?.email || this.invitation.order?.customerEmail || '',
-            templateId: this.invitation.templateId || '',
-            templateName: this.invitation.templateName || this.invitation.title,
-            packageName: curPkg.name,
-            amount: Number(curPkg.price || 0),
-            transferCode,
-            message: this.checkoutNote.trim() || `Thanh toán trực tiếp thiệp "${this.invitation.title}" (${curPkg.name})`,
-          });
-
-          this.invitation.order = this.invitation.order || {};
-          this.invitation.order.packageName = curPkg.name;
-          this.invitation.order.price = Number(curPkg.price || 0);
-          this.invitation.order.transferCode = transferCode;
-          this.invitation.order.paymentSubmittedAt = new Date().toISOString();
-          this.onToast('Đã lưu toàn bộ ảnh/nội dung & gửi xác nhận thanh toán! Studio sẽ mở khóa VIP ngay.', 'success');
-          this.renderInspector();
-        } catch (err) {
-          this.onToast(err.message || 'Lỗi gửi xác nhận thanh toán', 'error');
-        } finally {
-          this.submittingCheckout = false;
-          if (btn) { btn.disabled = false; btn.textContent = 'Lưu Thiệp & Xác Nhận Thanh Toán'; }
-        }
-      });
-    }
   }
 
   destroy() {

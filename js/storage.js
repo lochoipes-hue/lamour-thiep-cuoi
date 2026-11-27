@@ -841,6 +841,9 @@ class StorageService {
   }
 
   async completeCheckoutAndDeliver(invitationId, payload, { clientToken = '' } = {}) {
+    if (this.currentUser?.role !== 'admin') {
+      throw new Error('Hệ thống không hỗ trợ tự xác nhận thanh toán. Vui lòng quét mã QR để tự động bàn giao sau khi ngân hàng báo nhận tiền.');
+    }
     if (this.isCloudOnline()) {
       const headers = this.authHeaders({ 'Content-Type': 'application/json', ...(clientToken ? { 'X-Client-Token': clientToken } : {}) });
       const res = await fetch(this.apiUrl(`action=checkout_complete&id=${encodeURIComponent(invitationId)}`), {
@@ -1015,6 +1018,9 @@ class StorageService {
   }
 
   async confirmPaymentDemo(code, { clientToken = '' } = {}) {
+    if (this.currentUser?.role !== 'admin') {
+      throw new Error('Hệ thống chỉ tự động bàn giao khi ngân hàng MB Bank xác nhận đã nhận tiền.');
+    }
     if (this.isCloudOnline()) {
       const headers = this.authHeaders({ 'Content-Type': 'application/json', ...(clientToken ? { 'X-Client-Token': clientToken } : {}) });
       const res = await fetch(this.apiUrl('action=payment_confirm_demo'), {

@@ -1797,12 +1797,10 @@ async function renderClientPortal(invId, token, initialTab = '') {
           },
         });
       },
-      onGoCheckoutPage: () => {
-        navigateTo({ role: 'checkout', id: invId, token: token || res.invitation?.clientToken || '' });
-      },
-      onCheckoutOrder: async orderPayload => {
-        await storage.completeCheckoutAndDeliver(invId, orderPayload, { clientToken: token || res.invitation?.clientToken || '' });
-        navigateTo({ role: 'checkout', id: invId, token: token || res.invitation?.clientToken || '' });
+      onGoCheckoutPage: (_inv, pkgIdx) => {
+        const params = { role: 'checkout', id: invId, token: token || res.invitation?.clientToken || '' };
+        if (Number.isFinite(Number(pkgIdx))) params.pkg = Number(pkgIdx);
+        navigateTo(params);
       },
     });
     activeInstance = editor;
@@ -1817,7 +1815,7 @@ async function renderClientPortal(invId, token, initialTab = '') {
    TRANG THANH TOÁN VIETQR TRỰC TIẾP -> TỰ ĐỘNG CHUYỂN TRANG BÀN GIAO THIỆP
    (?role=checkout&id=...&token=... HOẶC ?role=checkout&tpl=...&pkg=...)
    ============================================================================ */
-async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx = 1, payCode = '' } = {}) {
+async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx = null, payCode = '' } = {}) {
   cleanupActive();
   hideChatWidget();
 
@@ -1825,15 +1823,19 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
   let settings = {};
   let allTemplates = getLiveTemplates();
   let activePayment = null;
-  let webhookActive = Boolean(storage.paymentWebhookActive);
   let effectiveToken = token || '';
   let pollTimer = null;
   let countdownTimer = null;
+  let visibilityHandler = null;
+  let focusHandler = null;
+  let checkingStatus = false;
   let redirected = false;
 
   const stopTimers = () => {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
     if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    if (visibilityHandler) { document.removeEventListener('visibilitychange', visibilityHandler); visibilityHandler = null; }
+    if (focusHandler) { window.removeEventListener('focus', focusHandler); focusHandler = null; }
   };
   activeInstance = { destroy: stopTimers };
 
@@ -1844,9 +1846,6 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
     if (Array.isArray(storeData.templates) && storeData.templates.length) {
       allTemplates = storeData.templates;
     }
-    if (typeof storeData.paymentWebhookActive === 'boolean') {
-      webhookActive = storeData.paymentWebhookActive;
-    }
   } catch (_) {}
 
   if (payCode) {
@@ -1854,7 +1853,6 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
       const st = await storage.getPaymentStatus(payCode);
       if (st?.payment) {
         activePayment = st.payment;
-        webhookActive = Boolean(st.webhookActive);
         invId = st.invitationId || invId;
         if (st.clientToken) effectiveToken = st.clientToken;
         if (st.status === 'paid' && invId) {
@@ -1893,8 +1891,11 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
   const zaloUrl = settings.zaloUrl || 'https://zalo.me/0354248177';
 
   let selectedTplId = inv?.templateId || tplId || allTemplates[0]?.id || 'nhung-do-co-dien';
+  const explicitPkg = pkgIdx !== null && pkgIdx !== undefined && pkgIdx !== '' && Number.isFinite(Number(pkgIdx)) ? Number(pkgIdx) : -1;
   const matchedPkg = inv ? pkgs.findIndex(p => p.name === inv.order?.packageName) : -1;
-  let selectedPkgIdx = matchedPkg >= 0 ? matchedPkg : Math.min(Math.max(0, Number(pkgIdx) || 1), Math.max(0, pkgs.length - 1));
+  let selectedPkgIdx = explicitPkg >= 0
+    ? Math.min(Math.max(0, explicitPkg), Math.max(0, pkgs.length - 1))
+    : (matchedPkg >= 0 ? matchedPkg : Math.min(1, Math.max(0, pkgs.length - 1)));
   let custName = activePayment?.name || inv?.order?.customerName || storage.currentUser?.name || '';
   let custPhone = sanitizePhoneDigits(activePayment?.phone || inv?.order?.customerPhone || storage.currentUser?.phone || '');
   let custNote = activePayment?.note || '';
@@ -1915,12 +1916,12 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
       banner.style.background = '#e8f7ee';
       banner.style.borderColor = '#4caf50';
       banner.style.color = '#1b5e20';
-      banner.innerHTML = '<strong>Đã nhận thanh toán thành công!</strong> Đang chuyển ngay tới Trang Bàn Giao Thiệp...';
+      banner.innerHTML = '<strong>Đã nhận thanh toán từ MB Bank!</strong> Đang tự động chuyển sang Trang Bàn Giao Thiệp...';
     }
-    showToast('Đã nhận thanh toán thành công! Đang mở Trang Bàn Giao Thiệp...', 'success');
+    showToast('Đã nhận thanh toán thành công! Đang chuyển sang Trang Bàn Giao Thiệp...', 'success');
     setTimeout(() => {
       navigateTo({ role: 'handover', id: targetInvId, token: targetToken || '' });
-    }, 1100);
+    }, 900);
   };
 
   const startQrPolling = () => {
@@ -1937,10 +1938,10 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
     countdownTimer = setInterval(updateTimerText, 1000);
 
     const checkNow = async () => {
-      if (!activePayment?.code || redirected) return;
+      if (!activePayment?.code || redirected || checkingStatus) return;
+      checkingStatus = true;
       try {
         const st = await storage.getPaymentStatus(activePayment.code);
-        webhookActive = Boolean(st.webhookActive);
         if (st.status === 'paid') {
           triggerHandoverRedirect(st.invitationId || activePayment.invitationId, st.clientToken || activePayment.clientToken || effectiveToken);
         } else if (st.payment?.underpaidAmount) {
@@ -1951,10 +1952,29 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
             b.style.color = '#92400e';
             b.innerHTML = `Đã ghi nhận chuyển khoản ${formatVnd(st.payment.underpaidAmount)} (chưa đủ ${formatVnd(activePayment.amount)}). Vui lòng chuyển đủ phần còn thiếu hoặc liên hệ Zalo ${escapeHtml(hotline)}.`;
           }
+        } else if (st.status === 'expired') {
+          const b = appRoot.querySelector('#qr-live-status-banner');
+          if (b) {
+            b.style.background = '#fff5f5';
+            b.style.borderColor = '#e5a3a3';
+            b.style.color = '#8a1c28';
+            b.innerHTML = '<strong>Mã QR đã hết hiệu lực 15 phút.</strong> Nếu bạn chưa chuyển khoản, hãy bấm "Tạo Mã QR Mới" bên dưới. Nếu bạn vừa chuyển tiền, hệ thống vẫn đang tiếp tục kiểm tra tự động.';
+          }
         }
-      } catch (_) {}
+      } catch (_) {
+      } finally {
+        checkingStatus = false;
+      }
     };
-    pollTimer = setInterval(checkNow, 3000);
+
+    checkNow();
+    pollTimer = setInterval(checkNow, 2500);
+    visibilityHandler = () => {
+      if (document.visibilityState === 'visible') checkNow();
+    };
+    focusHandler = () => { checkNow(); };
+    document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('focus', focusHandler);
   };
 
   const draw = () => {
@@ -1962,7 +1982,6 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
     const selectedTpl = allTemplates.find(t => t.id === selectedTplId) || allTemplates[0];
     const editUrl = inv ? buildAbsoluteUrl({ role: 'client', id: inv.id, token: effectiveToken }) : '';
     const isQrStep = Boolean(activePayment && activePayment.code);
-    const isAdmin = storage.currentUser?.role === 'admin';
 
     document.title = isQrStep
       ? `Quét Mã QR Thanh Toán ${activePayment.code} — ${settings.brandName || "L'Amour Atelier"}`
@@ -1974,7 +1993,7 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
           <div class="brand-monogram">L</div>
           <div>
             <div class="brand-script-name">${escapeHtml(settings.brandName || "L'Amour Atelier")}</div>
-            <div class="brand-sub-status"><span>${isQrStep ? 'Trang Quét Mã QR Thanh Toán Trực Tiếp' : 'Thanh Toán Tự Động Không Cần Chờ Duyệt'}</span></div>
+            <div class="brand-sub-status"><span>${isQrStep ? 'Quét Mã QR VietQR — Tự Động Chuyển Trang Bàn Giao' : 'Thanh Toán Tự Động Không Cần Chờ Duyệt'}</span></div>
           </div>
         </div>
         <div class="nav-actions">
@@ -2005,15 +2024,15 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
           return `
             <div class="panel-card" style="padding:24px;border-color:rgba(143,29,50,0.22);">
               <div style="text-align:center;margin-bottom:18px;">
-                <span class="badge badge-brand" style="padding:5px 12px;margin-bottom:8px;">CHUYỂN KHOẢN TRỰC TIẾP VÀO TÀI KHOẢN QUẢN LÝ — TỰ ĐỘNG BÀN GIAO</span>
+                <span class="badge badge-brand" style="padding:5px 12px;margin-bottom:8px;">CHUYỂN KHOẢN VIETQR — TỰ ĐỘNG BÀN GIAO THIỆP</span>
                 <h1 style="font-family:'Philosopher',serif;font-size:clamp(22px,3.6vw,30px);margin:4px 0 6px;">Quét Mã QR Để Thanh Toán</h1>
-                <p style="margin:0;font-size:13px;color:var(--ui-muted);">Mở ứng dụng Ngân hàng bất kỳ và quét mã bên dưới. Khi hệ thống nhận được thông báo đã vào tiền sẽ <strong>tự động chuyển ngay về Trang Bàn Giao Thiệp</strong> (không cần chờ Quản lý duyệt).</p>
+                <p style="margin:0;font-size:13px;color:var(--ui-muted);">Mở ứng dụng Ngân hàng bất kỳ để quét mã bên dưới. Khi chuyển khoản thành công, trang sẽ <strong>tự động chuyển thẳng sang Trang Bàn Giao Thiệp</strong> (không cần bấm nút xác nhận).</p>
               </div>
 
               <div id="qr-live-status-banner" style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:12px 14px;border-radius:12px;background:#f4faf6;border:1px solid #c2e5ce;color:#1b5e20;font-size:12.5px;margin-bottom:18px;">
                 <div style="display:flex;align-items:center;gap:8px;">
                   <span class="chat-pulse-dot"></span>
-                  <span><strong>Đang chờ thông báo nhận tiền từ MB Bank...</strong> (tự kiểm tra mỗi 3 giây)</span>
+                  <span><strong>Đang tự động chờ MB Bank báo nhận tiền...</strong> (tự động cập nhật liên tục)</span>
                 </div>
                 <span style="font-weight:700;font-variant-numeric:tabular-nums;">Hiệu lực: <span id="qr-countdown-text">${escapeHtml(cd.text)}</span></span>
               </div>
@@ -2066,22 +2085,12 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
                   </div>
 
                   <div style="display:flex;flex-direction:column;gap:8px;margin-top:2px;">
-                    <button type="button" class="btn btn-outline" id="btn-check-payment-now" style="width:100%;">Kiểm Tra Thông Báo Nhận Tiền Ngay</button>
-
-                    ${!webhookActive ? `
-                      <button type="button" class="btn btn-primary" id="btn-confirm-direct-handover" style="width:100%;padding:12px;">Tôi Đã Chuyển Khoản Xong — Chuyển Tới Trang Bàn Giao Thiệp</button>
-                      <div style="font-size:11.5px;color:var(--ui-muted);line-height:1.45;text-align:center;">
-                        Chủ Studio có thể gắn <strong>SePay / Casso</strong> trong Trang Quản Lý → Cài Đặt để tự động nhảy trang ngay khi tiền vào MB Bank mà không cần bấm nút này.
-                      </div>
-                    ` : `
-                      <div style="font-size:12px;color:#1b5e20;background:#eef8f1;border:1px solid #c2e5ce;border-radius:10px;padding:10px 12px;line-height:1.5;">
-                        <strong>Xác minh tự động MB Bank đang bật:</strong> Ngay khi bạn chuyển đúng số tiền &amp; nội dung <code>${escapeHtml(activePayment.code)}</code>, trang sẽ tự động mở khóa và chuyển sang Trang Bàn Giao Thiệp trong 3–5 giây.
-                      </div>
-                      ${isAdmin ? `<button type="button" class="btn btn-gold btn-sm" id="btn-confirm-direct-handover" style="width:100%;">Admin: Giả Lập Ngân Hàng Báo Đã Nhận Tiền (Test)</button>` : ''}
-                    `}
+                    <div style="font-size:12px;color:#1b5e20;background:#eef8f1;border:1px solid #c2e5ce;border-radius:10px;padding:11px 13px;line-height:1.55;">
+                      <strong>Tự động nhận tiền &amp; chuyển trang bàn giao:</strong> Chỉ cần chuyển đúng số tiền và nội dung <code>${escapeHtml(activePayment.code)}</code>. Giữ nguyên trang này (hoặc quay lại sau khi chuyển trên app ngân hàng), hệ thống sẽ tự động mở khóa thiệp sau 3–5 giây mà không cần bấm xác nhận.
+                    </div>
 
                     <div style="display:flex;gap:8px;">
-                      <button type="button" class="btn btn-ghost btn-sm" id="btn-change-pkg-step" style="flex:1;">Đổi Gói / Sửa Thông Tin</button>
+                      <button type="button" class="btn btn-ghost btn-sm" id="btn-change-pkg-step" style="flex:1;">Đổi Gói / Tạo Mã QR Mới</button>
                       <a class="btn btn-outline btn-sm" style="flex:1;" href="${escapeHtml(zaloUrl)}" target="_blank" rel="noopener">Hỗ trợ Zalo ${escapeHtml(hotline)}</a>
                     </div>
                   </div>
@@ -2152,10 +2161,10 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
                   <div style="display:flex;justify-content:space-between;"><span>Mẫu thiệp:</span><strong>${escapeHtml(inv?.title || selectedTpl?.name || '')}</strong></div>
                   <div style="display:flex;justify-content:space-between;"><span>Gói đã chọn:</span><strong>${escapeHtml(curPkg.name)}</strong></div>
                   <div style="display:flex;justify-content:space-between;"><span>Tổng thanh toán:</span><strong style="color:var(--ui-brand);font-size:16px;">${formatVnd(curPkg.price)}</strong></div>
-                  <div style="font-size:11.5px;color:var(--ui-muted);margin-top:4px;">Thanh toán thẳng vào <strong>${escapeHtml(bankName)} (${escapeHtml(bankNo)})</strong> — tự động nhận thông báo và chuyển về trang bàn giao thiệp.</div>
+                  <div style="font-size:11.5px;color:var(--ui-muted);margin-top:4px;">Bấm <strong>Thanh Toán Ngay</strong> để hiển thị mã QR <strong>${escapeHtml(bankName)} (${escapeHtml(bankNo)})</strong> — chuyển khoản xong hệ thống tự động mở trang bàn giao thiệp.</div>
                 </div>
 
-                <button type="submit" id="btn-create-qr-order" class="btn btn-primary" style="width:100%;padding:13px;font-size:14.5px;margin-bottom:10px;">Thanh Toán — Mở Trang Mã QR VietQR</button>
+                <button type="submit" id="btn-create-qr-order" class="btn btn-primary" style="width:100%;padding:13px;font-size:14.5px;margin-bottom:10px;">Thanh Toán Ngay</button>
                 <a class="btn btn-outline btn-sm" style="width:100%;" href="${escapeHtml(zaloUrl)}" target="_blank" rel="noopener">Cần tư vấn trước? Nhắn Zalo ${escapeHtml(hotline)}</a>
               </form>
             </div>
@@ -2172,40 +2181,6 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
 
     if (isQrStep) {
       startQrPolling();
-      appRoot.querySelector('#btn-check-payment-now')?.addEventListener('click', async e => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        btn.textContent = 'Đang kiểm tra giao dịch ngân hàng...';
-        try {
-          const st = await storage.getPaymentStatus(activePayment.code);
-          webhookActive = Boolean(st.webhookActive);
-          if (st.status === 'paid') {
-            triggerHandoverRedirect(st.invitationId || activePayment.invitationId, st.clientToken || activePayment.clientToken || effectiveToken);
-            return;
-          }
-          showToast('Chưa ghi nhận tiền vào cho mã ' + activePayment.code + '. Nếu bạn vừa chuyển, vui lòng đợi thêm vài giây.', 'info');
-        } catch (err) {
-          showToast(err.message || 'Không kiểm tra được lúc này', 'error');
-        } finally {
-          btn.disabled = false;
-          btn.textContent = 'Kiểm Tra Thông Báo Nhận Tiền Ngay';
-        }
-      });
-
-      appRoot.querySelector('#btn-confirm-direct-handover')?.addEventListener('click', async e => {
-        const btn = e.currentTarget;
-        btn.disabled = true;
-        btn.textContent = 'Đang kích hoạt & chuyển trang bàn giao thiệp...';
-        try {
-          const res = await storage.confirmPaymentDemo(activePayment.code, { clientToken: effectiveToken || activePayment.clientToken || '' });
-          triggerHandoverRedirect(activePayment.invitationId, res.clientToken || activePayment.clientToken || effectiveToken);
-        } catch (err) {
-          showToast(err.message || 'Chưa thể xác nhận thanh toán', 'error');
-          btn.disabled = false;
-          btn.textContent = isAdmin && webhookActive ? 'Admin: Giả Lập Ngân Hàng Báo Đã Nhận Tiền (Test)' : 'Tôi Đã Chuyển Khoản Xong — Chuyển Tới Trang Bàn Giao Thiệp';
-        }
-      });
-
       appRoot.querySelector('#btn-change-pkg-step')?.addEventListener('click', () => {
         stopTimers();
         activePayment = null;
@@ -2285,7 +2260,6 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
         }, { clientToken: effectiveToken });
 
         activePayment = created.payment;
-        webhookActive = Boolean(created.webhookActive);
         invId = created.invitationId || invId;
         effectiveToken = created.clientToken || effectiveToken;
 
@@ -2294,7 +2268,7 @@ async function renderCheckoutPage(invId = '', token = '', { tplId = '', pkgIdx =
         draw();
       } catch (err) {
         showToast(err.message || 'Không tạo được trang mã QR thanh toán', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Thanh Toán — Mở Trang Mã QR VietQR'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Thanh Toán Ngay'; }
       }
     });
   };
@@ -2458,7 +2432,7 @@ async function route() {
   if (role === 'checkout') {
     await renderCheckoutPage(id, token, {
       tplId: sp.get('tpl') || '',
-      pkgIdx: sp.has('pkg') ? Number(sp.get('pkg')) : 1,
+      pkgIdx: sp.has('pkg') ? Number(sp.get('pkg')) : null,
       payCode: sp.get('pay') || '',
     });
     return;
