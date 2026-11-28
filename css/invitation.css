@@ -725,15 +725,15 @@ body.inv-intro-locked {
    ========================================================================== */
 .hero-envelope-scene {
   position: relative;
-  width: min(334px, 92%);
-  margin: 10px auto 8px;
-  padding-top: 90px;
+  width: min(312px, 90%);
+  margin: 4px auto 6px;
+  padding-top: 74px;
 }
 
 .hero-velvet-back {
   position: relative;
   width: 100%;
-  height: 196px;
+  height: 174px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--inv-contrast-bg) 82%, #1a0608), var(--inv-contrast-bg));
   border-radius: 4px 4px 8px 8px;
   box-shadow: 0 24px 52px rgba(24, 8, 10, 0.28);
@@ -742,10 +742,10 @@ body.inv-intro-locked {
 /* Nắp tam giác sau có viền ren tối tinh tế */
 .hero-velvet-topflap {
   position: absolute;
-  top: -86px;
+  top: -72px;
   left: 0;
   right: 0;
-  height: 88px;
+  height: 74px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--inv-contrast-bg) 88%, #100305), var(--inv-contrast-bg));
   clip-path: polygon(0 100%, 50% 0, 100% 100%);
   box-shadow: inset 0 0 0 1px rgba(255, 232, 200, 0.14);
@@ -765,9 +765,9 @@ body.inv-intro-locked {
 /* Bó hoa màu nước cắm bên trái trong phong bì */
 .hero-envelope-bouquet {
   position: absolute;
-  left: -14px;
-  top: -94px;
-  width: 136px;
+  left: -12px;
+  top: -80px;
+  width: 122px;
   z-index: 3;
   animation: botanicalSway 6.5s ease-in-out infinite;
   transform-origin: bottom center;
@@ -777,8 +777,8 @@ body.inv-intro-locked {
 .hero-tilted-photo {
   position: absolute;
   right: 12px;
-  top: -78px;
-  width: 62%;
+  top: -68px;
+  width: 58%;
   aspect-ratio: 3 / 4;
   background: #ffffff;
   padding: 6px 6px 12px;
@@ -797,7 +797,7 @@ body.inv-intro-locked {
 }
 
 .hero-kicker {
-  margin-top: 18px;
+  margin-top: 12px;
 }
 
 .hero-date-line {
@@ -2084,15 +2084,17 @@ body.inv-intro-locked {
   gap: 8px;
 }
 
-.inv-radio-card {
+.inv-rsvp-glass .inv-radio-card {
   display: flex;
   align-items: center;
   gap: 11px;
   padding: 12px 14px;
+  margin-bottom: 0;
   border-radius: 10px;
   border: 1px solid rgba(255, 250, 240, 0.52);
   background: rgba(255, 255, 255, 0.16);
   color: #fdf7f0;
+  opacity: 1;
   cursor: pointer;
   font-family: 'Be Vietnam Pro', sans-serif;
   font-size: 13px;
@@ -2100,13 +2102,15 @@ body.inv-intro-locked {
   transition: background 0.18s ease, border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-.inv-radio-card:hover {
+.inv-rsvp-glass .inv-radio-card:hover {
   background: rgba(255, 255, 255, 0.26);
   border-color: rgba(255, 255, 255, 0.82);
 }
 
 .inv-radio-dot {
+  display: inline-block;
   width: 17px;
+  min-width: 17px;
   height: 17px;
   border-radius: 50%;
   border: 1.8px solid rgba(255, 250, 240, 0.78);
@@ -2115,8 +2119,8 @@ body.inv-intro-locked {
   transition: border-color 0.18s ease, background 0.18s ease;
 }
 
-.inv-radio-card input { display: none; }
-.inv-radio-card:has(input:checked) {
+.inv-rsvp-glass .inv-radio-card input { display: none; }
+.inv-rsvp-glass .inv-radio-card:has(input:checked) {
   background: rgba(255, 252, 246, 0.96);
   color: var(--inv-contrast-bg, #511419);
   border-color: #ffffff;
@@ -2124,7 +2128,7 @@ body.inv-intro-locked {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
 }
 
-.inv-radio-card:has(input:checked) .inv-radio-dot {
+.inv-rsvp-glass .inv-radio-card:has(input:checked) .inv-radio-dot {
   border-color: var(--inv-contrast-bg, #511419);
   background: var(--inv-contrast-bg, #511419);
   box-shadow: inset 0 0 0 3px #fffcf6;
