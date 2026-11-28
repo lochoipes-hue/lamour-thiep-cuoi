@@ -9,12 +9,12 @@
 export const EDITORIAL_SAMPLE_PHOTOS = {
   hero: 'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=960&q=85',
   album: [
-    'https://images.unsplash.com/photo-1519741497674-611481863552?auto=format&fit=crop&w=850&q=84',
     'https://images.unsplash.com/photo-1522673607200-164d1b6ce486?auto=format&fit=crop&w=850&q=84',
     'https://images.unsplash.com/photo-1583939003579-730e3918a45a?auto=format&fit=crop&w=850&q=84',
     'https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=850&q=84',
     'https://images.unsplash.com/photo-1465495976277-4387d4b0b4c6?auto=format&fit=crop&w=850&q=84',
     'https://images.unsplash.com/photo-1520854221256-17451cc331bf?auto=format&fit=crop&w=850&q=84',
+    'https://images.unsplash.com/photo-1519225421980-715cb0215aed?auto=format&fit=crop&w=850&q=84',
   ],
 };
 
@@ -135,41 +135,41 @@ export function getCoverFiligreeFrameSvg(ornamentStyle = 'botanical-peony') {
   return `
   <svg class="art-cover-filigree" viewBox="0 0 400 540" preserveAspectRatio="none" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
     <!-- Khung đôi mảnh ép kim -->
-    <rect x="14" y="14" width="372" height="512" rx="8" stroke="currentColor" stroke-width="1" opacity="0.55"/>
-    <rect x="22" y="22" width="356" height="496" rx="5" stroke="currentColor" stroke-width="0.65" opacity="0.38"/>
-    <!-- Đường vòm cổ điển bên trong -->
-    <path d="M36 504 V136 C36 66, 108 36, 200 36 C292 36, 364 66, 364 136 V504 Z" stroke="currentColor" stroke-width="0.75" opacity="0.45"/>
+    <rect x="12" y="12" width="376" height="516" rx="8" stroke="currentColor" stroke-width="1" opacity="0.52"/>
+    <rect x="20" y="20" width="360" height="500" rx="5" stroke="currentColor" stroke-width="0.65" opacity="0.34"/>
+    <!-- Đường vòm cổ điển bên trong (giữ khoảng trống an toàn cho nút Mở thiệp) -->
+    <path d="M32 518 V128 C32 62, 106 34, 200 34 C294 34, 368 62, 368 128 V518 Z" stroke="currentColor" stroke-width="0.72" opacity="0.38"/>
 
     <!-- Hoa văn cuộn 4 góc tinh xảo -->
-    <g stroke="currentColor" stroke-width="1.15" opacity="0.82">
+    <g stroke="currentColor" stroke-width="1.15" opacity="0.78">
       <!-- Trên trái -->
-      <path d="M14 74 C14 34, 34 14, 74 14"/>
-      <path d="M22 58 C24 36, 36 24, 58 22"/>
-      <path d="M26 26 C38 26, 44 32, 44 44 C32 44, 26 38, 26 26 Z" fill="currentColor" fill-opacity="0.16"/>
-      <circle cx="48" cy="48" r="2" fill="currentColor"/>
+      <path d="M12 72 C12 32, 32 12, 72 12"/>
+      <path d="M20 56 C22 34, 34 22, 56 20"/>
+      <path d="M24 24 C36 24, 42 30, 42 42 C30 42, 24 36, 24 24 Z" fill="currentColor" fill-opacity="0.16"/>
+      <circle cx="46" cy="46" r="2" fill="currentColor"/>
       <!-- Trên phải -->
-      <path d="M386 74 C386 34, 366 14, 326 14"/>
-      <path d="M378 58 C376 36, 364 24, 342 22"/>
-      <path d="M374 26 C362 26, 356 32, 356 44 C368 44, 374 38, 374 26 Z" fill="currentColor" fill-opacity="0.16"/>
-      <circle cx="352" cy="48" r="2" fill="currentColor"/>
+      <path d="M388 72 C388 32, 368 12, 328 12"/>
+      <path d="M380 56 C378 34, 366 22, 344 20"/>
+      <path d="M376 24 C364 24, 358 30, 358 42 C370 42, 376 36, 376 24 Z" fill="currentColor" fill-opacity="0.16"/>
+      <circle cx="354" cy="46" r="2" fill="currentColor"/>
       <!-- Dưới trái -->
-      <path d="M14 466 C14 506, 34 526, 74 526"/>
-      <path d="M22 482 C24 504, 36 516, 58 518"/>
-      <path d="M26 514 C38 514, 44 508, 44 496 C32 496, 26 502, 26 514 Z" fill="currentColor" fill-opacity="0.16"/>
-      <circle cx="48" cy="492" r="2" fill="currentColor"/>
+      <path d="M12 468 C12 508, 32 528, 72 528"/>
+      <path d="M20 484 C22 506, 34 518, 56 520"/>
+      <path d="M24 516 C36 516, 42 510, 42 498 C30 498, 24 504, 24 516 Z" fill="currentColor" fill-opacity="0.16"/>
+      <circle cx="46" cy="494" r="2" fill="currentColor"/>
       <!-- Dưới phải -->
-      <path d="M386 466 C386 506, 366 526, 326 526"/>
-      <path d="M378 482 C376 504, 364 516, 342 518"/>
-      <path d="M374 514 C362 514, 356 508, 356 496 C368 496, 374 502, 374 514 Z" fill="currentColor" fill-opacity="0.16"/>
-      <circle cx="352" cy="492" r="2" fill="currentColor"/>
+      <path d="M388 468 C388 508, 368 528, 328 528"/>
+      <path d="M380 484 C378 506, 366 518, 344 520"/>
+      <path d="M376 516 C364 516, 358 510, 358 498 C370 498, 376 504, 376 516 Z" fill="currentColor" fill-opacity="0.16"/>
+      <circle cx="354" cy="494" r="2" fill="currentColor"/>
     </g>
 
-    <!-- Huy hiệu trung tâm đỉnh & chân khung -->
+    <!-- Huy hiệu trung tâm đỉnh & chân khung (hạ thấp sát viền dưới để không chạm nút CTA) -->
     ${topCrown}
-    <g stroke="currentColor" stroke-width="0.9" opacity="0.65">
-      <line x1="126" y1="504" x2="184" y2="504"/>
-      <polygon points="200,498 208,504 200,510 192,504" fill="currentColor" fill-opacity="0.35"/>
-      <line x1="216" y1="504" x2="274" y2="504"/>
+    <g stroke="currentColor" stroke-width="0.9" opacity="0.62">
+      <line x1="132" y1="518" x2="186" y2="518"/>
+      <polygon points="200,513 207,518 200,523 193,518" fill="currentColor" fill-opacity="0.38"/>
+      <line x1="214" y1="518" x2="268" y2="518"/>
     </g>
   </svg>`;
 }

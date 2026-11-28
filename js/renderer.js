@@ -137,6 +137,72 @@ function bankNameByCode(code) {
   return (VIET_BANKS.find(b => b.code === code) || { name: code || 'Ngân hàng' }).name;
 }
 
+function calcCoverflowPos(idx, activeIdx, total) {
+  let delta = idx - activeIdx;
+  if (total >= 3) {
+    const half = Math.floor(total / 2);
+    if (delta > half) delta -= total;
+    if (delta < -half) delta += total;
+  }
+  return delta === 0 ? 'pos-0'
+    : delta === -1 ? 'pos-left-1'
+    : delta === 1 ? 'pos-right-1'
+    : delta === -2 ? 'pos-left-2'
+    : delta === 2 ? 'pos-right-2'
+    : 'pos-hidden';
+}
+
+function escapeIcsText(str) {
+  return String(str || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\r?\n/g, '\\n')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
+}
+
+function buildIcsContent(ev, c) {
+  const timeMatch = String(ev?.time || '').match(/(\d{1,2})[:h](\d{2})/i);
+  const dateMatch = String(ev?.time || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  const fallbackDate = parseDateParts(c?.weddingDate);
+  const year = dateMatch ? Number(dateMatch[3]) : fallbackDate.year;
+  const month = dateMatch ? Number(dateMatch[2]) : fallbackDate.month;
+  const day = dateMatch ? Number(dateMatch[1]) : fallbackDate.day;
+  const fallbackTime = String(c?.weddingTime || '17:00').split(':');
+  const hour = timeMatch ? Number(timeMatch[1]) : Number(fallbackTime[0] || 17);
+  const minute = timeMatch ? Number(timeMatch[2]) : Number(fallbackTime[1] || 0);
+
+  const pad = n => String(n).padStart(2, '0');
+  const startDt = new Date(year, month - 1, day, hour, minute, 0);
+  const endDt = new Date(startDt.getTime() + 2 * 60 * 60 * 1000);
+  const fmtLocal = dt => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const summary = `${ev?.name || 'Lễ Cưới'} — ${c?.groomName || ''} & ${c?.brideName || ''}`.trim();
+  const location = [ev?.venue, ev?.address].filter(Boolean).join(', ');
+  const description = `Thiệp mời cưới của ${c?.groomName || ''} & ${c?.brideName || ''}. ${ev?.time || ''}`.trim();
+
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//DaiLo Wedding//Invitation Calendar//VI',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:dailo-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@dailowedding`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${fmtLocal(startDt)}`,
+    `DTEND:${fmtLocal(endDt)}`,
+    `SUMMARY:${escapeIcsText(summary)}`,
+    `LOCATION:${escapeIcsText(location)}`,
+    `DESCRIPTION:${escapeIcsText(description)}`,
+    'BEGIN:VALARM',
+    'TRIGGER:-P1D',
+    'ACTION:DISPLAY',
+    `DESCRIPTION:${escapeIcsText(`Nhắc lịch: ${summary}`)}`,
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].join('\r\n');
+}
+
 /**
  * Khung ảnh mẫu nghệ thuật Passe-Partout (không dùng icon hộp ảnh sơ sài!)
  */
@@ -207,6 +273,8 @@ export class InvitationRenderer {
     this.particleCtrl = null;
     this.countdownTimer = null;
     this.observer = null;
+    this.dockObserver = null;
+    this.lightboxCleanup = null;
     this.scrollHandler = null;
     this.trailHandler = null;
     this.lastTrailTime = 0;
@@ -334,6 +402,10 @@ export class InvitationRenderer {
       sectionsHtml = enabledSections.map(sec => this.renderSectionCard(sec, d, c)).join('');
     }
 
+    const dockHtml = (!this.options.inPreview && !this.options.editable && !isPaged)
+      ? this.buildGuestDockHtml(enabledSections)
+      : '';
+
     this.container.innerHTML = `
       <div class="${stageClasses}" data-texture="${escapeHtml(d.texture || 'parchment')}" data-reading="${escapeHtml(readingMode)}" data-scroll-fx="${escapeHtml(scrollFx)}" style="${styleVars}">
         <div class="inv-scroll-progress" data-scroll-bar></div>
@@ -347,8 +419,9 @@ export class InvitationRenderer {
         <div class="inv-shell">
           ${sectionsHtml}
         </div>
+        ${dockHtml}
         <div class="inv-floating-controls">
-          <button type="button" class="inv-music-disc ${musicEngine.playing ? 'is-playing' : ''}" data-action="toggle-music" aria-label="Bật hoặc tắt nhạc nền" title="Bật / Tắt nhạc nền">
+          <button type="button" class="inv-music-disc ${musicEngine.playing ? 'is-playing' : ''}" data-action="toggle-music" aria-label="Bật hoặc tắt nhạc nền" aria-pressed="${musicEngine.playing ? 'true' : 'false'}" title="Bật / Tắt nhạc nền">
             ${musicEngine.playing
               ? '<span class="eq-bars"><span></span><span></span><span></span><span></span></span>'
               : icon('musicOff', 18)}
@@ -361,6 +434,31 @@ export class InvitationRenderer {
     this.startParticles(d);
     this.startCountdown(c.weddingDate, c.weddingTime);
     this.setupScrollEffects(readingMode);
+  }
+
+  buildGuestDockHtml(enabledSections) {
+    const labelMap = {
+      gallery: 'Album',
+      countdown: 'Lịch',
+      events: 'Địa điểm',
+      rsvp: 'RSVP',
+      guestbook: 'Lưu bút',
+    };
+    const navItems = enabledSections
+      .filter(s => labelMap[s.type])
+      .slice(0, 5)
+      .map(s => `<button type="button" class="inv-dock-link" data-dock-jump="${escapeHtml(s.type)}">${labelMap[s.type]}</button>`)
+      .join('');
+    return `
+      <nav class="inv-guest-dock" aria-label="Điều hướng nhanh thiệp cưới">
+        <div class="inv-dock-links">${navItems}</div>
+        <span class="inv-dock-sep" aria-hidden="true"></span>
+        <div class="inv-dock-actions">
+          <button type="button" class="inv-dock-icon-btn is-heart" data-action="send-blessing" aria-label="Thả tim chúc phúc" title="Thả tim chúc phúc">${icon('heartSolid', 14)}</button>
+          <button type="button" class="inv-dock-icon-btn" data-action="share-invite" aria-label="Chia sẻ thiệp cưới" title="Chia sẻ thiệp cưới">${icon('share', 14)}</button>
+        </div>
+      </nav>
+    `;
   }
 
   buildAmbientMotes() {
@@ -391,7 +489,11 @@ export class InvitationRenderer {
             ${filigree}
             <div class="intro-spray-left" style="color:var(--inv-ornament);">${getBotanicalSpraySvg('left')}</div>
             <div class="intro-spray-right" style="color:var(--inv-ornament);">${getBotanicalSpraySvg('right')}</div>
-            <div style="width:52px;height:52px;margin:0 auto 14px;">${getWaxSealSvg(waxSymbol)}</div>
+            <div class="intro-wax-wrap">
+              <span class="intro-wax-pulse" aria-hidden="true"></span>
+              ${getWaxSealSvg(waxSymbol)}
+            </div>
+            <div class="intro-eyebrow-kicker">${escapeHtml(c.topBadge || 'THIỆP MỜI CƯỚI')}</div>
             <h2 class="intro-editorial-names">
               ${escapeHtml(c.groomName)}
               <span class="intro-editorial-amp">&amp;</span>
@@ -539,20 +641,26 @@ export class InvitationRenderer {
             </div>
           </div>
 
-          <div class="inv-eyebrow" style="margin-top:26px;">${escapeHtml(c.topBadge)}</div>
+          <div class="inv-eyebrow hero-kicker">${escapeHtml(c.topBadge)}</div>
           <h1 class="inv-display-couple">
             ${escapeHtml(c.groomName)}
             <span class="inv-display-amp">&amp;</span>
             ${escapeHtml(c.brideName)}
           </h1>
           ${getFleuronDividerSvg()}
-          <div style="text-align:center;font-size:13.5px;letter-spacing:1.6px;color:var(--inv-muted);">
+          <div class="hero-date-line">
             ${escapeHtml(c.weddingTime || '17:00')} • ${dp.dow.toUpperCase()} • ${String(dp.day).padStart(2, '0')} . ${String(dp.month).padStart(2, '0')} . ${dp.year}
           </div>
           <div class="inv-guest-honor">
             <span>${escapeHtml(c.inviteLine || 'Trân trọng kính mời')}</span>
             <strong>${escapeHtml(c.displayGuestName)}</strong>
           </div>
+          ${!this.options.inPreview && !this.options.editable ? `
+            <div class="inv-scroll-cue" aria-hidden="true">
+              <span>Cuộn xuống xem thiệp</span>
+              <i class="inv-scroll-cue-line"></i>
+            </div>
+          ` : ''}
         `;
         break;
       }
@@ -578,8 +686,12 @@ export class InvitationRenderer {
             </div>
           </div>
 
-          <div class="inv-eyebrow" style="opacity:0.86;">${escapeHtml(c.quoteHeading || 'TRÂN TRỌNG BÁO TIN LỄ THÀNH HÔN CỦA CON CHÚNG TÔI')}</div>
-          <div class="inv-display-couple" style="margin:14px 0 12px;">
+          <div class="inv-contrast-ornament" aria-hidden="true">
+            <span></span><i></i><span></span>
+          </div>
+
+          <div class="inv-eyebrow" style="opacity:0.88;">${escapeHtml(c.quoteHeading || 'TRÂN TRỌNG BÁO TIN LỄ THÀNH HÔN CỦA CON CHÚNG TÔI')}</div>
+          <div class="inv-display-couple" style="margin:12px 0 10px;">
             ${escapeHtml(c.groomName)}
             <span class="inv-display-amp">&amp;</span>
             ${escapeHtml(c.brideName)}
@@ -613,17 +725,12 @@ export class InvitationRenderer {
           <h3 class="inv-heading">${escapeHtml(c.galleryHeading || 'ALBUM ẢNH')}</h3>
           <div class="coverflow-stage" data-coverflow-stage>
             ${photos.map((src, idx) => {
-              const delta = idx - this.coverflowIdx;
-              const posClass = delta === 0 ? 'pos-0'
-                : delta === -1 ? 'pos-left-1'
-                : delta === 1 ? 'pos-right-1'
-                : delta === -2 ? 'pos-left-2'
-                : delta === 2 ? 'pos-right-2'
-                : 'pos-hidden';
+              const posClass = calcCoverflowPos(idx, this.coverflowIdx, photos.length);
               return `
                 <div class="coverflow-slide ${posClass}" data-cf-idx="${idx}">
                   ${src
-                    ? `<img src="${escapeHtml(src)}" alt="Ảnh cưới ${idx + 1}" loading="lazy" data-lightbox-src="${escapeHtml(src)}" data-fallback-label="Ảnh Album 0${idx + 1}" data-fallback-sub="Không gian ảnh cưới" />`
+                    ? `<img src="${escapeHtml(src)}" alt="Ảnh cưới ${idx + 1}" loading="lazy" data-lightbox-src="${escapeHtml(src)}" data-fallback-label="Ảnh Album 0${idx + 1}" data-fallback-sub="Không gian ảnh cưới" />
+                       <span class="coverflow-zoom-hint" aria-hidden="true">${icon('maximize', 13)}</span>`
                     : renderBlankFrame(`Ảnh Album 0${idx + 1}`, this.options.blankMode ? 'Khung trình diễn 3D' : 'Thêm ảnh trong mục Album')}
                 </div>
               `;
@@ -634,6 +741,10 @@ export class InvitationRenderer {
             <span class="coverflow-counter" data-cf-counter>${this.coverflowIdx + 1} / ${photos.length}</span>
             <button type="button" class="coverflow-arrow" data-cf-dir="1" aria-label="Ảnh tiếp">${icon('chevronRight', 15)}</button>
           </div>
+          <div class="coverflow-dots" role="tablist" aria-label="Chọn ảnh trong album">
+            ${photos.map((_, idx) => `<button type="button" class="coverflow-dot ${idx === this.coverflowIdx ? 'is-active' : ''}" data-cf-dot="${idx}" aria-label="Ảnh ${idx + 1}"></button>`).join('')}
+          </div>
+          <div class="coverflow-caption">Chạm ảnh giữa để phóng to toàn màn hình • Vuốt ngang để xem tiếp</div>
         `;
         break;
       }
@@ -658,11 +769,25 @@ export class InvitationRenderer {
           </div>
 
           <div class="inv-cd-inline" data-countdown-root>
-            <div style="font-size:12px;opacity:0.78;margin-bottom:4px;">${escapeHtml(c.countdownLabel || 'Cùng đếm ngược')}</div>
-            <strong data-cd="days">00</strong> ngày
-            <strong data-cd="hours">00</strong> giờ
-            <strong data-cd="mins">00</strong> phút
-            <strong data-cd="secs">00</strong> giây
+            <div class="inv-cd-kicker">${escapeHtml(c.countdownLabel || 'Cùng đếm ngược đến ngày chung đôi')}</div>
+            <div class="inv-cd-grid">
+              <div class="inv-cd-tile">
+                <strong data-cd="days">00</strong>
+                <span>Ngày</span>
+              </div>
+              <div class="inv-cd-tile">
+                <strong data-cd="hours">00</strong>
+                <span>Giờ</span>
+              </div>
+              <div class="inv-cd-tile">
+                <strong data-cd="mins">00</strong>
+                <span>Phút</span>
+              </div>
+              <div class="inv-cd-tile is-secs">
+                <strong data-cd="secs">00</strong>
+                <span>Giây</span>
+              </div>
+            </div>
           </div>
 
           ${buildCalendarHtml(c.weddingDate)}
@@ -676,15 +801,19 @@ export class InvitationRenderer {
           <div class="inv-eyebrow">${escapeHtml(c.eventsEyebrow || 'THỜI GIAN & ĐỊA ĐIỂM')}</div>
           <h3 class="inv-heading">${escapeHtml(c.eventsHeading || 'TIỆC CƯỚI ĐƯỢC TỔ CHỨC TẠI')}</h3>
           ${dividerSvg}
-          ${(c.events || []).map(ev => `
-            <div class="inv-event-row">
+          ${(c.events || []).map((ev, evIdx) => `
+            <div class="inv-event-row" style="--stagger-idx:${evIdx};">
+              <div class="inv-event-badge">Nghi Lễ ${String(evIdx + 1).padStart(2, '0')}</div>
               <h4>${escapeHtml(ev.name)}</h4>
-              <div class="inv-event-meta"><span>${escapeHtml(ev.time)}</span></div>
-              <div class="inv-event-venue">${escapeHtml(ev.venue)}</div>
+              <div class="inv-event-meta">${icon('clock', 14)}<span>${escapeHtml(ev.time)}</span></div>
+              <div class="inv-event-venue">${icon('mapPin', 14)}<span>${escapeHtml(ev.venue)}</span></div>
               <div class="inv-event-addr">${escapeHtml(ev.address)}</div>
-              ${ev.mapUrl && ev.mapUrl !== '#'
-                ? `<a class="inv-btn outline" href="${escapeHtml(ev.mapUrl)}" target="_blank" rel="noopener">Chỉ đường Google Maps</a>`
-                : `<button type="button" class="inv-btn outline" disabled>Liên kết Google Maps</button>`}
+              <div class="inv-event-actions">
+                ${ev.mapUrl && ev.mapUrl !== '#'
+                  ? `<a class="inv-btn" href="${escapeHtml(ev.mapUrl)}" target="_blank" rel="noopener">${icon('mapPin', 14)} Chỉ đường Maps</a>`
+                  : `<button type="button" class="inv-btn outline" disabled>${icon('mapPin', 14)} Liên kết Google Maps</button>`}
+                <button type="button" class="inv-btn outline" data-add-calendar="${evIdx}">${icon('calendarPlus', 14)} Lưu vào Lịch</button>
+              </div>
             </div>
           `).join('')}
         `;
@@ -698,8 +827,9 @@ export class InvitationRenderer {
           <h3 class="inv-heading">${escapeHtml(c.storyHeading || 'CHUYỆN TÌNH YÊU')}</h3>
           ${dividerSvg}
           <div class="inv-timeline">
-            ${(c.story || []).map(st => `
-              <div class="inv-timeline-item">
+            ${(c.story || []).map((st, stIdx) => `
+              <div class="inv-timeline-item" style="--stagger-idx:${stIdx};">
+                <span class="inv-timeline-num" aria-hidden="true">${String(stIdx + 1).padStart(2, '0')}</span>
                 <div class="inv-timeline-date">${escapeHtml(st.date)}</div>
                 <h5>${escapeHtml(st.title)}</h5>
                 <p>${escapeHtml(st.text)}</p>
@@ -724,11 +854,20 @@ export class InvitationRenderer {
           ${dividerSvg}
           <p class="inv-subtitle">${escapeHtml(g.subtitle || '')}</p>
           ${giftLocked ? `
-            <div style="margin:14px auto 0;max-width:340px;padding:18px 16px;border-radius:14px;border:1px dashed var(--inv-ornament);background:rgba(255,255,255,0.58);text-align:center;">
-              <div style="font-size:11px;letter-spacing:1.8px;text-transform:uppercase;color:var(--inv-primary);font-weight:700;margin-bottom:6px;">TÍNH NĂNG BẢN CHÍNH THỨC</div>
-              <p style="font-size:12.5px;color:var(--inv-muted);margin:0;line-height:1.55;">
-                Bao Lì Xì tương tác &amp; mã VietQR mừng cưới Chú Rể / Cô Dâu được mở khóa tự động khi nâng cấp từ bản dùng thử ${trialState.days} ngày.
-              </p>
+            <div class="inv-gift-trial-tease">
+              <div class="inv-gift-tease-bg" aria-hidden="true">
+                <div class="lixi-body lixi-tease-card">
+                  <span class="lixi-flap"></span>
+                  <span class="lixi-coin">囍</span>
+                </div>
+              </div>
+              <div class="inv-gift-tease-glass">
+                <span class="inv-gift-lock-pill">${icon('lock', 13)} Bản Chính Thức</span>
+                <h4>Bao Lì Xì 3D &amp; Mã VietQR</h4>
+                <p>
+                  Bao Lì Xì tương tác chạm mở nắp 3D cùng mã chuyển khoản VietQR của Chú Rể &amp; Cô Dâu sẽ tự động mở khóa khi nâng cấp từ bản dùng thử ${trialState.days} ngày.
+                </p>
+              </div>
             </div>
           ` : `
           <div class="lixi-wrap ${openByDefault ? 'is-open' : ''}" data-lixi-wrap>
@@ -792,14 +931,17 @@ export class InvitationRenderer {
                   <div class="inv-radio-card-list">
                     <label class="inv-radio-card">
                       <input type="radio" name="attendance" value="yes" checked />
+                      <span class="inv-radio-dot" aria-hidden="true"></span>
                       <span>Tôi chắc chắn sẽ đến</span>
                     </label>
                     <label class="inv-radio-card">
                       <input type="radio" name="attendance" value="maybe" />
+                      <span class="inv-radio-dot" aria-hidden="true"></span>
                       <span>Tôi đang sắp xếp lịch</span>
                     </label>
                     <label class="inv-radio-card">
                       <input type="radio" name="attendance" value="no" />
+                      <span class="inv-radio-dot" aria-hidden="true"></span>
                       <span>Rất tiếc, tôi không thể tham dự</span>
                     </label>
                   </div>
@@ -873,7 +1015,10 @@ export class InvitationRenderer {
         inner = `
           <div class="inv-papernote-card">
             <div class="sec-floral-edge bottom-left" style="color:var(--inv-ornament);">${getBotanicalSpraySvg('left')}</div>
-            <h3 class="inv-heading" style="margin-top:0;font-size:24px;">${escapeHtml(c.guestbookHeading || 'SỔ LƯU BÚT')}</h3>
+            <div class="inv-gb-head-wrap">
+              <h3 class="inv-heading" style="margin-top:0;margin-bottom:4px;font-size:24px;">${escapeHtml(c.guestbookHeading || 'SỔ LƯU BÚT')}</h3>
+              <div class="inv-gb-count">${wishes.length} lời chúc phúc đã được gửi</div>
+            </div>
             <form data-quick-wish-form style="display:flex;flex-direction:column;gap:10px;position:relative;z-index:5;">
               <input type="text" name="name" required placeholder="Nhập tên của bạn*" value="${escapeHtml(this.options.blankMode ? '' : (this.options.guestName || ''))}" />
               <textarea name="wish" rows="3" required placeholder="Nhập lời chúc phúc*"></textarea>
@@ -940,20 +1085,24 @@ export class InvitationRenderer {
         if (introOverlay.classList.contains('opening')) return;
         introOverlay.classList.add('opening');
         const rect = stage.getBoundingClientRect();
-        this.particleCtrl?.triggerBurst(e.clientX - rect.left, e.clientY - rect.top, 42);
+        this.particleCtrl?.triggerBurst(e.clientX - rect.left, e.clientY - rect.top, 46);
+        setTimeout(() => {
+          this.particleCtrl?.triggerBurst(rect.width * 0.5, rect.height * 0.36, 28);
+        }, 260);
         if (this.invitation.music?.autoplay !== false) {
           musicEngine.start(this.invitation.music || { trackId: d.musicTrack || 'canon-d' });
         }
         setTimeout(() => {
           this.introOpened = true;
           stage.classList.remove('has-intro-open');
+          stage.classList.add('hero-just-opened');
           if (!this.options.inPreview) document.body.classList.remove('inv-intro-locked');
           introOverlay.classList.add('is-opened');
           setTimeout(() => {
             introOverlay.remove();
             this.particleCtrl?.resize();
           }, 860);
-        }, 720);
+        }, 740);
       });
     }
 
@@ -961,6 +1110,7 @@ export class InvitationRenderer {
     const syncMusicIcon = playing => {
       if (!musicBtn) return;
       musicBtn.classList.toggle('is-playing', playing);
+      musicBtn.setAttribute('aria-pressed', playing ? 'true' : 'false');
       musicBtn.innerHTML = playing
         ? '<span class="eq-bars"><span></span><span></span><span></span><span></span></span>'
         : icon('musicOff', 18);
@@ -973,24 +1123,94 @@ export class InvitationRenderer {
     }
     this.musicUnsub = musicEngine.onChange(syncMusicIcon);
 
-    // 3D Coverflow Album
+    // Floating Guest Dock: Quick-Jump, Heart Blessing Burst & Share
+    stage.querySelectorAll('[data-dock-jump]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        const secType = btn.dataset.dockJump;
+        const target = stage.querySelector(`.inv-section[data-section-type="${secType}"]`);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+
+    stage.querySelector('[data-action="send-blessing"]')?.addEventListener('click', e => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      btn.classList.remove('is-popping');
+      void btn.offsetWidth;
+      btn.classList.add('is-popping');
+      const rect = stage.getBoundingClientRect();
+      this.particleCtrl?.triggerBurst(e.clientX - rect.left, e.clientY - rect.top - 24, 34);
+      this.toast(`Đã gửi lời chúc yêu thương tới ${c.groomName} & ${c.brideName}!`, 'success');
+    });
+
+    stage.querySelector('[data-action="share-invite"]')?.addEventListener('click', async e => {
+      e.stopPropagation();
+      const shareUrl = window.location.href;
+      const shareTitle = `Thiệp cưới ${c.groomName} & ${c.brideName}`;
+      const shareText = `Trân trọng kính mời bạn chung vui ngày trọng đại của ${c.groomName} & ${c.brideName}.`;
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: shareTitle, text: shareText, url: shareUrl });
+          return;
+        }
+      } catch (err) {
+        if (err?.name === 'AbortError') return;
+      }
+      navigator.clipboard?.writeText(shareUrl)
+        .then(() => this.toast('Đã sao chép đường dẫn thiệp cưới để chia sẻ!', 'success'))
+        .catch(() => this.toast('Hãy sao chép link trên thanh địa chỉ để chia sẻ.', 'info'));
+    });
+
+    // Save Event to Calendar (.ics)
+    stage.querySelectorAll('[data-add-calendar]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (this.options.blankMode) {
+          this.toast('Đang ở chế độ mẫu trống — không tạo file lịch nhắc.', 'info');
+          return;
+        }
+        const ev = (c.events || [])[Number(btn.dataset.addCalendar)];
+        if (!ev) return;
+        try {
+          const ics = buildIcsContent(ev, c);
+          const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `lich-cuoi-${(ev.id || 'su-kien').replace(/[^a-z0-9_-]/gi, '')}.ics`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 1500);
+          this.toast(`Đã tải lịch nhắc "${ev.name}" (.ics) — mở để lưu vào lịch!`, 'success');
+        } catch (_) {
+          this.toast('Không thể tải file lịch trên trình duyệt này.', 'error');
+        }
+      });
+    });
+
+    // 3D Coverflow Album (Circular Wrap-Around + Dots + Swipe)
     const cfStage = stage.querySelector('[data-coverflow-stage]');
     if (cfStage) {
       const slides = Array.from(cfStage.querySelectorAll('.coverflow-slide'));
+      const dots = Array.from(stage.querySelectorAll('[data-cf-dot]'));
       const counterEl = stage.querySelector('[data-cf-counter]');
       const updateCoverflow = nextIdx => {
         if (!slides.length) return;
         this.coverflowIdx = ((nextIdx % slides.length) + slides.length) % slides.length;
         slides.forEach((s, idx) => {
           s.classList.remove('pos-0', 'pos-left-1', 'pos-right-1', 'pos-left-2', 'pos-right-2', 'pos-hidden');
-          const delta = idx - this.coverflowIdx;
-          const cls = delta === 0 ? 'pos-0' : delta === -1 ? 'pos-left-1' : delta === 1 ? 'pos-right-1' : delta === -2 ? 'pos-left-2' : delta === 2 ? 'pos-right-2' : 'pos-hidden';
-          s.classList.add(cls);
+          s.classList.add(calcCoverflowPos(idx, this.coverflowIdx, slides.length));
         });
+        dots.forEach((dot, idx) => dot.classList.toggle('is-active', idx === this.coverflowIdx));
         if (counterEl) counterEl.textContent = `${this.coverflowIdx + 1} / ${slides.length}`;
       };
       stage.querySelectorAll('[data-cf-dir]').forEach(btn => {
         btn.addEventListener('click', e => { e.stopPropagation(); updateCoverflow(this.coverflowIdx + Number(btn.dataset.cfDir)); });
+      });
+      dots.forEach(dot => {
+        dot.addEventListener('click', e => { e.stopPropagation(); updateCoverflow(Number(dot.dataset.cfDot)); });
       });
       slides.forEach(s => {
         s.addEventListener('click', e => {
@@ -1081,11 +1301,7 @@ export class InvitationRenderer {
         const slide = img.closest('.coverflow-slide');
         if (slide && !slide.classList.contains('pos-0')) return;
         e.stopPropagation();
-        const box = document.createElement('div');
-        box.className = 'inv-lightbox';
-        box.innerHTML = `<button class="inv-lightbox-close" type="button" aria-label="Đóng">${icon('x', 18)}</button><img src="${escapeHtml(img.dataset.lightboxSrc)}" alt="Xem ảnh cưới" />`;
-        box.addEventListener('click', () => box.remove());
-        document.body.appendChild(box);
+        this.openLightbox(stage, img.dataset.lightboxSrc);
       });
     });
 
@@ -1185,6 +1401,95 @@ export class InvitationRenderer {
     }
   }
 
+  openLightbox(stage, startSrc) {
+    if (this.lightboxCleanup) this.lightboxCleanup();
+    const seen = new Set();
+    const items = [];
+    stage.querySelectorAll('img[data-lightbox-src]').forEach(el => {
+      const src = el.dataset.lightboxSrc;
+      if (!src || seen.has(src)) return;
+      seen.add(src);
+      items.push({ src, alt: el.alt || 'Ảnh cưới' });
+    });
+    if (!items.length && startSrc) items.push({ src: startSrc, alt: 'Ảnh cưới' });
+    let curIdx = Math.max(0, items.findIndex(x => x.src === startSrc));
+
+    const box = document.createElement('div');
+    box.className = 'inv-lightbox';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-modal', 'true');
+    box.setAttribute('aria-label', 'Xem ảnh cưới toàn màn hình');
+    box.innerHTML = `
+      <div class="inv-lightbox-topbar">
+        <span class="inv-lightbox-counter" data-lb-counter></span>
+        <button class="inv-lightbox-close" type="button" data-lb-close aria-label="Đóng">${icon('x', 18)}</button>
+      </div>
+      ${items.length > 1 ? `<button class="inv-lightbox-nav prev" type="button" data-lb-dir="-1" aria-label="Ảnh trước">${icon('chevronLeft', 22)}</button>` : ''}
+      <div class="inv-lightbox-stage">
+        <img data-lb-img src="" alt="Xem ảnh cưới" />
+      </div>
+      ${items.length > 1 ? `<button class="inv-lightbox-nav next" type="button" data-lb-dir="1" aria-label="Ảnh tiếp">${icon('chevronRight', 22)}</button>` : ''}
+      <div class="inv-lightbox-caption" data-lb-caption></div>
+    `;
+
+    const imgEl = box.querySelector('[data-lb-img]');
+    const counterEl = box.querySelector('[data-lb-counter]');
+    const capEl = box.querySelector('[data-lb-caption]');
+
+    const renderSlide = idx => {
+      curIdx = ((idx % items.length) + items.length) % items.length;
+      const item = items[curIdx];
+      imgEl.classList.add('is-switching');
+      imgEl.src = item.src;
+      imgEl.alt = item.alt;
+      counterEl.textContent = `${curIdx + 1} / ${items.length}`;
+      capEl.textContent = items.length > 1
+        ? `${item.alt} • Vuốt ngang hoặc dùng phím mũi tên`
+        : item.alt;
+      requestAnimationFrame(() => imgEl.classList.remove('is-switching'));
+    };
+
+    const closeBox = () => {
+      if (this.lightboxCleanup) this.lightboxCleanup();
+    };
+
+    const onKeyDown = e => {
+      if (e.key === 'Escape') { e.preventDefault(); closeBox(); }
+      else if (e.key === 'ArrowLeft' && items.length > 1) { e.preventDefault(); renderSlide(curIdx - 1); }
+      else if (e.key === 'ArrowRight' && items.length > 1) { e.preventDefault(); renderSlide(curIdx + 1); }
+    };
+
+    box.querySelector('[data-lb-close]')?.addEventListener('click', closeBox);
+    box.querySelectorAll('[data-lb-dir]').forEach(btn => {
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        renderSlide(curIdx + Number(btn.dataset.lbDir));
+      });
+    });
+    box.addEventListener('click', e => {
+      if (e.target === box || e.target.classList.contains('inv-lightbox-stage')) closeBox();
+    });
+
+    let lbTouchX = null;
+    box.addEventListener('touchstart', e => { lbTouchX = e.changedTouches[0]?.clientX ?? null; }, { passive: true });
+    box.addEventListener('touchend', e => {
+      if (lbTouchX === null || items.length < 2) return;
+      const dx = (e.changedTouches[0]?.clientX ?? 0) - lbTouchX;
+      lbTouchX = null;
+      if (Math.abs(dx) > 42) renderSlide(curIdx + (dx < 0 ? 1 : -1));
+    }, { passive: true });
+
+    window.addEventListener('keydown', onKeyDown);
+    this.lightboxCleanup = () => {
+      window.removeEventListener('keydown', onKeyDown);
+      box.remove();
+      this.lightboxCleanup = null;
+    };
+
+    renderSlide(curIdx);
+    document.body.appendChild(box);
+  }
+
   replayIntro() { this.introOpened = false; this.render(this.invitation); }
 
   startParticles(d) {
@@ -1198,9 +1503,22 @@ export class InvitationRenderer {
     const root = this.container.querySelector('[data-countdown-root]');
     if (!root) return;
     const target = new Date(`${dateStr || '2026-12-20'}T${timeStr || '17:00'}:00`).getTime();
+    let prevSec = '';
     const tick = () => {
       const diff = Math.max(0, target - Date.now());
-      const set = (k, v) => { const el = root.querySelector(`[data-cd="${k}"]`); if (el) el.textContent = String(v).padStart(2, '0'); };
+      const set = (k, v) => {
+        const el = root.querySelector(`[data-cd="${k}"]`);
+        const formatted = String(v).padStart(2, '0');
+        if (el && el.textContent !== formatted) {
+          el.textContent = formatted;
+          if (k === 'secs' && prevSec && prevSec !== formatted) {
+            el.classList.remove('is-tick');
+            void el.offsetWidth;
+            el.classList.add('is-tick');
+          }
+        }
+        if (k === 'secs') prevSec = formatted;
+      };
       set('days', Math.floor(diff / 86400000));
       set('hours', Math.floor((diff % 86400000) / 3600000));
       set('mins', Math.floor((diff % 3600000) / 60000));
@@ -1233,6 +1551,27 @@ export class InvitationRenderer {
     scrollTarget.addEventListener('scroll', this.scrollHandler, { passive: true });
     this.scrollHandler();
 
+    if ('IntersectionObserver' in window) {
+      const dockLinks = Array.from(stage.querySelectorAll('[data-dock-jump]'));
+      if (dockLinks.length) {
+        const dockTargets = dockLinks
+          .map(btn => stage.querySelector(`.inv-section[data-section-type="${btn.dataset.dockJump}"]`))
+          .filter(Boolean);
+        this.dockObserver = new IntersectionObserver(
+          entries => {
+            const visible = entries
+              .filter(e => e.isIntersecting)
+              .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+            if (!visible) return;
+            const activeType = visible.target.dataset.sectionType;
+            dockLinks.forEach(btn => btn.classList.toggle('is-active', btn.dataset.dockJump === activeType));
+          },
+          { root: this.options.inPreview ? this.container : null, rootMargin: '-25% 0px -45% 0px', threshold: [0.1, 0.35] }
+        );
+        dockTargets.forEach(t => this.dockObserver.observe(t));
+      }
+    }
+
     if (readingMode !== 'scroll-parallax' || !('IntersectionObserver' in window)) return;
     const sections = stage.querySelectorAll('.inv-section');
     sections.forEach((s, idx) => { if (idx > 0) s.classList.add('reveal-pending'); });
@@ -1253,6 +1592,8 @@ export class InvitationRenderer {
   cleanupTimers() {
     if (this.countdownTimer) { clearInterval(this.countdownTimer); this.countdownTimer = null; }
     if (this.observer) { this.observer.disconnect(); this.observer = null; }
+    if (this.dockObserver) { this.dockObserver.disconnect(); this.dockObserver = null; }
+    if (this.lightboxCleanup) { this.lightboxCleanup(); }
     if (this.scrollHandler) {
       const target = this.options.inPreview ? this.container : window;
       target.removeEventListener('scroll', this.scrollHandler);
