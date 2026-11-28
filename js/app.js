@@ -15,6 +15,7 @@ import {
 } from './data.js?v=15';
 import {
   EDITORIAL_SAMPLE_PHOTOS,
+  getBotanicalSpraySvg,
   getWaxSealSvg,
   getCoverFiligreeFrameSvg,
   resolveBackdropUrl,
@@ -26,7 +27,7 @@ import { StudioEditor, buildAbsoluteUrl } from './studio.js?v=15';
 import { AdminManagementCenter } from './admin-center.js?v=15';
 import { musicEngine } from './audio-fx.js?v=15';
 import { icon } from './icons.js?v=15';
-import { initGlobalWebFx, bindInteractiveTiltCards, bindScrollStagger } from './web-fx.js?v=15';
+import { initGlobalWebFx, bindInteractiveTiltCards, bindScrollStagger, bindSiteScrollProgress } from './web-fx.js?v=15';
 
 const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modal-root');
@@ -34,8 +35,11 @@ const toastRoot = document.getElementById('toast-root');
 const chatWidgetRoot = document.getElementById('chat-widget-root');
 
 let activeInstance = null;
+let siteScrollCleanup = null;
 let adminDb = null;
 let publicStore = null;
+let activeAnnouncementIdx = 0;
+let annBarCollapsedThisView = false;
 let chatOpen = false;
 let chatPollTimer = null;
 let chatUnsubSync = null;
@@ -91,6 +95,10 @@ function formatVnd(n) {
 }
 
 function cleanupActive() {
+  if (typeof siteScrollCleanup === 'function') {
+    try { siteScrollCleanup(); } catch (_) {}
+    siteScrollCleanup = null;
+  }
   if (activeInstance && typeof activeInstance.destroy === 'function') {
     activeInstance.destroy();
   }
@@ -135,6 +143,122 @@ function navigateTo(params) {
 function getLiveTemplates() {
   const list = publicStore?.templates;
   return Array.isArray(list) && list.length ? list : TEMPLATES;
+}
+
+function getLiveAnnouncements() {
+  const list = publicStore?.announcements;
+  if (!Array.isArray(list)) return [];
+  return list.filter(a => a && a.active !== false);
+}
+
+function getAnnouncementTypeMeta(type) {
+  switch (String(type || 'info').toLowerCase()) {
+    case 'promo': return { label: 'Ưu Đãi', cls: 'type-promo' };
+    case 'important': return { label: 'Quan Trọng', cls: 'type-important' };
+    case 'maintenance': return { label: 'Cập Nhật', cls: 'type-maintenance' };
+    default: return { label: 'Thông Báo', cls: 'type-info' };
+  }
+}
+
+function formatAnnouncementTime(iso) {
+  if (!iso) return '';
+  const dt = new Date(iso);
+  if (isNaN(dt.getTime())) return '';
+  const p = n => String(n).padStart(2, '0');
+  return `${p(dt.getHours())}:${p(dt.getMinutes())} • ${p(dt.getDate())}/${p(dt.getMonth() + 1)}/${dt.getFullYear()}`;
+}
+
+function renderAnnouncementBellBtn(count = 0) {
+  return `
+    <button type="button" class="nav-announce-btn ${count > 0 ? 'has-alerts' : ''}" data-open-announcements aria-label="Xem thông báo từ quản lý" title="${count > 0 ? `Có ${count} thông báo mới từ Quản Lý` : 'Bảng thông báo từ Quản Lý'}">
+      ${icon('bell', 16)}
+      ${count > 0 ? `<span class="nav-announce-count">${count > 9 ? '9+' : count}</span>` : ''}
+    </button>
+  `;
+}
+
+function renderAnnouncementBarHtml(announcements) {
+  if (!announcements.length || annBarCollapsedThisView) return '';
+  if (activeAnnouncementIdx >= announcements.length) activeAnnouncementIdx = 0;
+  const cur = announcements[activeAnnouncementIdx];
+  const meta = getAnnouncementTypeMeta(cur.type);
+  const snippet = String(cur.content || '').replace(/\s+/g, ' ').trim();
+  const shortBody = snippet.length > 120 ? snippet.slice(0, 120) + '...' : snippet;
+  const isExternalCta = cur.ctaUrl && /^https?:\/\//i.test(cur.ctaUrl);
+
+  return `
+    <div class="site-announcement-bar ${meta.cls}" role="region" aria-label="Thông báo chính thức từ Quản Lý">
+      <div class="site-announcement-inner">
+        <div class="site-announcement-main">
+          <span class="site-ann-pill">${cur.pinned ? icon('pin', 11) : icon('megaphone', 11)} ${escapeHtml(meta.label)}</span>
+          <div class="site-ann-text">
+            <strong>${escapeHtml(cur.title)}</strong>${shortBody ? ` — ${escapeHtml(shortBody)}` : ''}
+          </div>
+        </div>
+        <div class="site-ann-controls">
+          ${cur.ctaLabel && cur.ctaUrl ? `
+            <a class="site-ann-btn is-solid" href="${escapeHtml(cur.ctaUrl)}" ${isExternalCta ? 'target="_blank" rel="noopener"' : ''}>${escapeHtml(cur.ctaLabel)}</a>
+          ` : ''}
+          <button type="button" class="site-ann-btn" data-open-announcements="${escapeHtml(cur.id)}">Xem chi tiết</button>
+          ${announcements.length > 1 ? `
+            <button type="button" class="site-ann-btn is-icon" data-ann-bar-step="-1" aria-label="Thông báo trước">${icon('chevronLeft', 13)}</button>
+            <span style="font-size:11px;font-weight:700;opacity:0.86;min-width:30px;text-align:center;">${activeAnnouncementIdx + 1}/${announcements.length}</span>
+            <button type="button" class="site-ann-btn is-icon" data-ann-bar-step="1" aria-label="Thông báo tiếp">${icon('chevronRight', 13)}</button>
+          ` : ''}
+          <button type="button" class="site-ann-btn is-icon" data-ann-bar-hide aria-label="Thu gọn dải thông báo" title="Thu gọn tạm thời">${icon('x', 13)}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openAnnouncementsModal(focusId = '') {
+  const list = getLiveAnnouncements();
+  openModal(`
+    <div class="modal-head">
+      <div>
+        <h3>${icon('megaphone', 17)} Bảng Thông Báo Chính Thức</h3>
+        <small style="color:var(--ui-muted);">Thông báo trực tiếp từ Quản Lý DaiLo Wedding — luôn được lưu và cập nhật mới nhất</small>
+      </div>
+      <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
+    </div>
+    ${list.length === 0 ? `
+      <div style="text-align:center;padding:34px 16px;color:var(--ui-muted);font-size:13.5px;">
+        <div style="margin-bottom:8px;color:var(--ui-brand);">${icon('bell', 24)}</div>
+        Hiện chưa có thông báo nào từ Quản Lý.
+      </div>
+    ` : `
+      <div class="ann-modal-list">
+        ${list.map(ann => {
+          const meta = getAnnouncementTypeMeta(ann.type);
+          const isExternal = ann.ctaUrl && /^https?:\/\//i.test(ann.ctaUrl);
+          const isFocus = focusId && ann.id === focusId;
+          return `
+            <article class="ann-public-card ${meta.cls}" style="${isFocus ? 'box-shadow:0 0 0 2px rgba(143,29,50,0.22);' : ''}">
+              <div class="ann-card-meta">
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                  <span class="ann-type-badge ${meta.cls}">${escapeHtml(meta.label)}</span>
+                  ${ann.pinned ? `<span class="badge badge-gold">${icon('pin', 11)} Đã ghim</span>` : ''}
+                </div>
+                <span style="font-size:11.5px;color:var(--ui-muted);">${escapeHtml(formatAnnouncementTime(ann.updatedAt || ann.createdAt))}</span>
+              </div>
+              <h4 class="ann-card-title">${escapeHtml(ann.title)}</h4>
+              <p class="ann-card-body">${escapeHtml(ann.content)}</p>
+              <div class="ann-card-foot">
+                <span>${escapeHtml(ann.createdBy || 'Quản Lý DaiLo Wedding')}</span>
+                ${ann.ctaLabel && ann.ctaUrl ? `
+                  <a class="btn btn-primary btn-xs btn-pill" href="${escapeHtml(ann.ctaUrl)}" ${isExternal ? 'target="_blank" rel="noopener"' : 'data-ann-cta-local'}>${escapeHtml(ann.ctaLabel)}</a>
+                ` : ''}
+              </div>
+            </article>
+          `;
+        }).join('')}
+      </div>
+    `}
+  `);
+  modalRoot.querySelectorAll('[data-ann-cta-local]').forEach(link => {
+    link.addEventListener('click', () => closeModal());
+  });
 }
 
 /**
@@ -1778,8 +1902,10 @@ function renderPosterCardVisual(t, blankMode, idx) {
 
 function renderTopAuthControls() {
   const u = storage.currentUser;
+  const bellBtn = renderAnnouncementBellBtn(getLiveAnnouncements().length);
   if (!u) {
     return `
+      ${bellBtn}
       <button type="button" class="btn btn-outline btn-sm btn-pill" data-open-booking-nav>Đặt Lịch Tư Vấn</button>
       <button type="button" class="btn btn-primary btn-sm btn-pill" data-open-auth="login">Đăng Nhập</button>
     `;
@@ -1787,6 +1913,7 @@ function renderTopAuthControls() {
   const initial = (u.name || u.email || 'U').trim().charAt(0).toUpperCase();
   if (u.role === 'admin') {
     return `
+      ${bellBtn}
       <button type="button" class="btn btn-primary btn-sm btn-pill" data-go-admin-center>Trang Quản Lý</button>
       <button type="button" class="user-pill-btn" data-nav-logout title="Đăng xuất">
         <span class="user-avatar-dot">${escapeHtml(initial)}</span>
@@ -1795,6 +1922,7 @@ function renderTopAuthControls() {
     `;
   }
   return `
+    ${bellBtn}
     <button type="button" class="btn btn-outline btn-sm btn-pill" data-open-booking-nav>Đặt Lịch</button>
     <button type="button" class="user-pill-btn" data-go-customer-account>
       <span class="user-avatar-dot">${escapeHtml(initial)}</span>
@@ -1828,10 +1956,14 @@ async function renderShowroom(initialBlank = true) {
       if (elements.includes(activeFilter)) return (t.elements || []).includes(activeFilter);
       return t.category === activeFilter;
     });
+    const announcements = getLiveAnnouncements();
     const quickQrUrl = buildOwnerVietQrUrl(settings, (settings.packages?.[1]?.price || 189000), 'DAT THIEP CUOI');
 
     document.title = `${settings.brandName || 'DaiLo Wedding'} — Thiết Kế Thiệp Cưới Online Cao Cấp`;
     appRoot.innerHTML = `
+      <div class="site-scroll-progress" data-site-scroll-bar></div>
+      <div class="site-editorial-grain" aria-hidden="true"></div>
+
       <header class="top-nav">
         <div class="brand-mark" data-go-store>
           <div class="brand-monogram">DL</div>
@@ -1844,14 +1976,18 @@ async function renderShowroom(initialBlank = true) {
           </div>
         </div>
         <nav class="nav-center-links">
+          ${announcements.length ? `<a href="#thong-bao-studio">Thông Báo (${announcements.length})</a>` : ''}
           <a href="#kho-mau">Bộ Sưu Tập Mẫu</a>
+          <a href="#hieu-ung-thiep">Hiệu Ứng 3D</a>
           <a href="#bang-gia">Bảng Giá</a>
-          <a href="#thanh-toan-tu-van">Thanh Toán &amp; Tư Vấn</a>
+          <a href="#thanh-toan-tu-van">Tư Vấn</a>
         </nav>
         <div class="nav-actions">
           ${renderTopAuthControls()}
         </div>
       </header>
+
+      ${renderAnnouncementBarHtml(announcements)}
 
       <section class="store-hero">
         <div class="hero-bg-photo" style="background-image:url('${resolveBackdropUrl('ivory-floral-arch')}');"></div>
@@ -1862,18 +1998,18 @@ async function renderShowroom(initialBlank = true) {
 
         <div class="store-hero-grid">
           <div>
-            <span class="hero-kicker">THIẾT KẾ BIÊN TẬP • PHONG THỦY NGŨ HÀNH</span>
+            <span class="hero-kicker">${icon('sparkles', 13)} THIẾT KẾ BIÊN TẬP • PHONG THỦY NGŨ HÀNH</span>
             <h1>Thiệp Cưới <span>Online</span> Chuẩn Thẩm Mỹ Studio</h1>
             <p class="hero-lead">${escapeHtml(settings.tagline || '')}</p>
             <div class="hero-cta-row">
-              <a href="#kho-mau" class="btn btn-primary btn-pill" style="padding:12px 26px;">Khám Phá Kho Mẫu</a>
-              <button type="button" class="btn btn-gold btn-pill" style="padding:12px 24px;" data-open-live-demo>Mở Thiệp Thực Tế</button>
+              <a href="#kho-mau" class="btn btn-primary btn-sheen btn-pill" style="padding:12px 26px;">Khám Phá Kho Mẫu</a>
+              <button type="button" class="btn btn-gold btn-sheen btn-pill" style="padding:12px 24px;" data-open-live-demo>Mở Thiệp Thực Tế</button>
               <button type="button" class="btn btn-outline btn-pill" style="padding:12px 22px;" data-open-booking-hero>Đặt Lịch Tư Vấn</button>
             </div>
             <div class="hero-pillars">
               <span>Mở bìa 3D &amp; Hoa rơi</span>
               <span>•</span>
-              <span>Màu hợp Ngũ Hành</span>
+              <span>Album Coverflow 3D</span>
               <span>•</span>
               <span>Thanh toán VietQR MB Bank</span>
             </div>
@@ -1894,7 +2030,7 @@ async function renderShowroom(initialBlank = true) {
               </div>
             </div>
 
-            <div class="mockup-phone center">
+            <div class="mockup-phone center" data-open-live-demo title="Nhấn để trải nghiệm thiệp thực tế">
               <div class="mockup-notch"></div>
               <div class="mockup-screen" style="background:url('${resolveBackdropUrl('burgundy-roses')}') center/cover;color:#fdf7f0;">
                 <div style="position:absolute;inset:0;background:rgba(81,20,25,0.62);backdrop-filter:blur(2px);"></div>
@@ -1928,12 +2064,83 @@ async function renderShowroom(initialBlank = true) {
             </div>
           </div>
         </div>
+
+        <div class="hero-trust-strip" data-reveal>
+          <div class="hero-trust-tile">
+            <span class="hero-trust-num">01</span>
+            <div>
+              <strong>Bìa Ép Kim &amp; Mở 3D</strong>
+              <small>Dấu sáp phát sáng, cánh hoa bay &amp; nhạc nền tự phát</small>
+            </div>
+          </div>
+          <div class="hero-trust-tile">
+            <span class="hero-trust-num">02</span>
+            <div>
+              <strong>Album Coverflow 3D</strong>
+              <small>Xoay vòng đối xứng 2 bên &amp; Lightbox toàn màn hình</small>
+            </div>
+          </div>
+          <div class="hero-trust-tile">
+            <span class="hero-trust-num">03</span>
+            <div>
+              <strong>Đếm Ngược &amp; Lưu Lịch</strong>
+              <small>Đồng hồ 4 ô kính mờ &amp; tải lịch nhắc .ics 1 chạm</small>
+            </div>
+          </div>
+          <div class="hero-trust-tile">
+            <span class="hero-trust-num">04</span>
+            <div>
+              <strong>VietQR Tự Động 24/7</strong>
+              <small>Xác nhận MB Bank tự động &amp; bàn giao link ngay lập tức</small>
+            </div>
+          </div>
+        </div>
       </section>
+
+      ${announcements.length > 0 ? `
+        <section class="site-announcements-board" id="thong-bao-studio" data-reveal>
+          <div class="ann-board-frame">
+            <div class="ann-board-head">
+              <div class="ann-board-title">
+                <span class="ann-board-ico">${icon('megaphone', 18)}</span>
+                <div>
+                  <h2>Thông Báo Mới Nhất Từ DaiLo Wedding</h2>
+                  <small>Tin tức, ưu đãi &amp; cập nhật chính thức từ Quản Lý Studio</small>
+                </div>
+              </div>
+              <button type="button" class="btn btn-outline btn-xs btn-pill" data-open-announcements>Xem tất cả (${announcements.length})</button>
+            </div>
+
+            <div class="ann-cards-grid">
+              ${announcements.slice(0, 3).map(ann => {
+                const meta = getAnnouncementTypeMeta(ann.type);
+                const isExternal = ann.ctaUrl && /^https?:\/\//i.test(ann.ctaUrl);
+                return `
+                  <article class="ann-public-card ${meta.cls}">
+                    <div class="ann-card-meta">
+                      <span class="ann-type-badge ${meta.cls}">${escapeHtml(meta.label)}</span>
+                      ${ann.pinned ? `<span class="badge badge-gold">${icon('pin', 11)} Đã ghim</span>` : ''}
+                    </div>
+                    <h3 class="ann-card-title">${escapeHtml(ann.title)}</h3>
+                    <p class="ann-card-body">${escapeHtml(ann.content)}</p>
+                    <div class="ann-card-foot">
+                      <span>${escapeHtml(formatAnnouncementTime(ann.updatedAt || ann.createdAt))}</span>
+                      ${ann.ctaLabel && ann.ctaUrl
+                        ? `<a class="btn btn-primary btn-xs btn-pill" href="${escapeHtml(ann.ctaUrl)}" ${isExternal ? 'target="_blank" rel="noopener"' : ''}>${escapeHtml(ann.ctaLabel)}</a>`
+                        : `<button type="button" class="btn btn-ghost btn-xs" data-open-announcements="${escapeHtml(ann.id)}">Chi tiết</button>`}
+                    </div>
+                  </article>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        </section>
+      ` : ''}
 
       <main class="store-container" id="kho-mau">
         <div class="section-header-center" data-reveal>
           <h2>Bộ Sưu Tập Mẫu Thiệp Cưới</h2>
-          <p>Hài lòng mẫu nào bấm Đặt &amp; QR để thanh toán ngay • Chưa ưng ý có thể chat trực tiếp hoặc đặt lịch thiết kế riêng</p>
+          <p>Đang hiển thị <strong>${filtered.length} / ${allTemplates.length}</strong> mẫu chuẩn biên tập • Bấm <strong>Xem mẫu</strong> hoặc <strong>Sửa &amp; Mua</strong> để tự tùy chỉnh ngay</p>
         </div>
 
         <div class="filter-bar">
@@ -1979,6 +2186,46 @@ async function renderShowroom(initialBlank = true) {
           }).join('')}
         </div>
 
+        <section id="hieu-ung-thiep" class="fx-showcase-band" data-reveal>
+          <div class="fx-showcase-botanical" aria-hidden="true">${getBotanicalSpraySvg('right')}</div>
+          <div class="fx-showcase-inner">
+            <div class="fx-showcase-head">
+              <span class="fx-showcase-kicker">${icon('award', 13)} TRẢI NGHIỆM KHÁCH MỜI CHUẨN STUDIO</span>
+              <h2>Mọi Hiệu Ứng Cao Cấp Đều Đã Tích Hợp Sẵn</h2>
+              <p>Mỗi tấm thiệp DaiLo Wedding đều sở hữu hệ hiệu ứng biên tập đồng bộ từ bìa mở màn, ánh nhung viền chỉ vàng cho tới thanh điều hướng nổi và Bao Lì Xì 3D.</p>
+            </div>
+            <div class="fx-showcase-grid">
+              <div class="fx-showcase-card">
+                <span class="fx-card-ico">${icon('mail', 18)}</span>
+                <h3>Mở Bìa Dấu Sáp &amp; Pháo Hoa</h3>
+                <small style="display:block;font-size:10.5px;color:#f3d799;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px;">5 phong cách mở màn</small>
+                <p>Hào quang dấu sáp vàng, 2 đợt cánh hoa bay khi mở thiệp, chuyển cảnh mượt mà cùng bản nhạc cưới tự phát.</p>
+              </div>
+              <div class="fx-showcase-card">
+                <span class="fx-card-ico">${icon('maximize', 18)}</span>
+                <h3>Album Coverflow 3D Đối Xứng</h3>
+                <small style="display:block;font-size:10.5px;color:#f3d799;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px;">Vuốt ngang &amp; Lightbox đa ảnh</small>
+                <p>Xếp lớp ảnh 3D xoay vòng cân đối hai bên, chấm chuyển ảnh động và phóng to toàn màn hình hỗ trợ vuốt tay.</p>
+              </div>
+              <div class="fx-showcase-card">
+                <span class="fx-card-ico">${icon('calendarPlus', 18)}</span>
+                <h3>Đếm Ngược 4 Ô &amp; Lưu Lịch .ics</h3>
+                <small style="display:block;font-size:10.5px;color:#f3d799;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px;">Nhắc ngày cưới tự động</small>
+                <p>Đồng hồ 4 ô kính mờ nhịp nảy từng giây, tờ lịch tháng trái tim và nút lưu thẳng vào Lịch iPhone / Android.</p>
+              </div>
+              <div class="fx-showcase-card">
+                <span class="fx-card-ico">${icon('heartSolid', 18)}</span>
+                <h3>Dock Nổi, RSVP &amp; Bao Lì Xì 3D</h3>
+                <small style="display:block;font-size:10.5px;color:#f3d799;letter-spacing:1.2px;text-transform:uppercase;margin-bottom:6px;">Tương tác tức thì</small>
+                <p>Thanh điều hướng kính mờ nhảy mục nhanh, nút thả tim chúc phúc, xác nhận RSVP tương phản cao và Bao Lì Xì VietQR.</p>
+              </div>
+            </div>
+            <div style="text-align:center;margin-top:26px;">
+              <button type="button" class="btn btn-gold btn-sheen btn-pill" style="padding:12px 28px;" data-open-live-demo>Trải Nghiệm Thiệp Thực Tế Ngay</button>
+            </div>
+          </div>
+        </section>
+
         <section id="bang-gia" style="margin-top:80px;">
           <div class="section-header-center" data-reveal>
             <h2>Bảng Giá Gói Thiệp Cưới</h2>
@@ -2000,7 +2247,7 @@ async function renderShowroom(initialBlank = true) {
                   ${(pkg.features || []).map(f => `<li><span class="diamond-bullet">◆</span> <span>${escapeHtml(f)}</span></li>`).join('')}
                   ${(pkg.excluded || []).map(ex => `<li style="color:var(--ui-muted);opacity:0.74;font-size:12px;"><span style="flex-shrink:0;">—</span> <span>${escapeHtml(ex)}</span></li>`).join('')}
                 </ul>
-                <button type="button" class="btn btn-pill ${idx === 1 || idx === 2 ? 'btn-primary' : 'btn-outline'}" data-order-pkg="${idx}">Chọn gói &amp; Thanh toán QR</button>
+                <button type="button" class="btn btn-pill ${idx === 1 || idx === 2 ? 'btn-primary btn-sheen' : 'btn-outline'}" data-order-pkg="${idx}">Chọn gói &amp; Thanh toán QR</button>
               </div>
             `).join('')}
           </div>
@@ -2016,8 +2263,8 @@ async function renderShowroom(initialBlank = true) {
               Hoặc bấm <strong>Chat Tư Vấn / Đặt Lịch Hẹn</strong> để tôi phối màu hợp mệnh và thiết kế riêng theo đúng ý bạn.
             </p>
             <div style="display:flex;gap:10px;flex-wrap:wrap;">
-              <button type="button" class="btn btn-gold btn-pill" style="padding:11px 22px;" data-open-chat-band>Mở Khung Chat Tư Vấn</button>
-              <button type="button" class="btn btn-primary btn-pill" style="padding:11px 22px;" data-open-booking-band>Đặt Lịch Tư Vấn 1-1</button>
+              <button type="button" class="btn btn-gold btn-sheen btn-pill" style="padding:11px 22px;" data-open-chat-band>Mở Khung Chat Tư Vấn</button>
+              <button type="button" class="btn btn-primary btn-sheen btn-pill" style="padding:11px 22px;" data-open-booking-band>Đặt Lịch Tư Vấn 1-1</button>
               <a class="btn btn-outline btn-pill" style="background:rgba(255,255,255,0.1);color:#fff;border-color:rgba(255,255,255,0.28);" href="tel:${escapeHtml((settings.phoneRaw || '0354248177').replace(/\s+/g, ''))}">Gọi ${escapeHtml(hotline)}</a>
             </div>
           </div>
@@ -2032,14 +2279,36 @@ async function renderShowroom(initialBlank = true) {
           </div>
         </section>
       </main>
+
+      <nav class="site-floating-dock" data-site-dock aria-label="Điều hướng nhanh Showroom">
+        ${announcements.length ? `<button type="button" class="site-dock-btn" data-site-jump="#thong-bao-studio">Thông Báo</button>` : ''}
+        <button type="button" class="site-dock-btn is-active" data-site-jump="#kho-mau">Kho Mẫu</button>
+        <button type="button" class="site-dock-btn" data-site-jump="#hieu-ung-thiep">Hiệu Ứng</button>
+        <button type="button" class="site-dock-btn" data-site-jump="#bang-gia">Bảng Giá</button>
+        <button type="button" class="site-dock-btn" data-site-jump="#thanh-toan-tu-van">Tư Vấn</button>
+        <span class="site-dock-sep" aria-hidden="true"></span>
+        <button type="button" class="site-dock-top" data-site-top aria-label="Lên đầu trang" title="Lên đầu trang">${icon('arrowUp', 14)}</button>
+      </nav>
     `;
 
     appRoot.querySelector('[data-open-auth]')?.addEventListener('click', () => openAuthModal('login'));
     appRoot.querySelector('[data-go-admin-center]')?.addEventListener('click', () => navigateTo({ role: 'admin' }));
     appRoot.querySelector('[data-go-customer-account]')?.addEventListener('click', () => navigateTo({ role: 'account' }));
     appRoot.querySelector('[data-nav-logout]')?.addEventListener('click', async () => { await storage.authLogout(); showToast('Đã đăng xuất', 'info'); route(); });
+    appRoot.querySelectorAll('[data-open-announcements]').forEach(b => b.addEventListener('click', () => openAnnouncementsModal(b.dataset.openAnnouncements || '')));
+    appRoot.querySelectorAll('[data-ann-bar-step]').forEach(b => b.addEventListener('click', () => {
+      const total = getLiveAnnouncements().length;
+      if (total > 1) {
+        activeAnnouncementIdx = ((activeAnnouncementIdx + Number(b.dataset.annBarStep)) % total + total) % total;
+        draw();
+      }
+    }));
+    appRoot.querySelector('[data-ann-bar-hide]')?.addEventListener('click', () => {
+      annBarCollapsedThisView = true;
+      draw();
+    });
     appRoot.querySelectorAll('[data-open-booking-nav], [data-open-booking-hero], [data-open-booking-band]').forEach(b => b.addEventListener('click', () => openBookingModal(settings)));
-    appRoot.querySelector('[data-open-live-demo]')?.addEventListener('click', () => navigateTo({ role: 'guest', id: 'baongoc-minhquan', guest: 'Quý Khách Danh Dự' }));
+    appRoot.querySelectorAll('[data-open-live-demo]').forEach(b => b.addEventListener('click', () => navigateTo({ role: 'guest', id: 'baongoc-minhquan', guest: 'Quý Khách Danh Dự' })));
     appRoot.querySelectorAll('[data-filter]').forEach(btn => btn.addEventListener('click', () => { activeFilter = btn.dataset.filter; draw(); }));
     appRoot.querySelector('#store-blank-toggle')?.addEventListener('change', e => { blankMode = e.target.checked; draw(); });
     appRoot.querySelector('[data-open-chat-band]')?.addEventListener('click', () => openConsultationChat(settings));
@@ -2059,6 +2328,7 @@ async function renderShowroom(initialBlank = true) {
 
     bindInteractiveTiltCards(appRoot);
     bindScrollStagger(appRoot);
+    siteScrollCleanup = bindSiteScrollProgress(appRoot);
     renderChatWidget(settings);
   };
 
@@ -2166,11 +2436,13 @@ async function renderCustomerAccountView() {
         </div>
       </div>
       <div class="nav-actions">
+        ${renderAnnouncementBellBtn(getLiveAnnouncements().length)}
         <button type="button" class="btn btn-outline btn-sm" data-go-store>Xem Kho Mẫu</button>
         <button type="button" class="btn btn-primary btn-sm" data-acc-book>Đặt Lịch Tư Vấn</button>
         <button type="button" class="btn btn-ghost btn-sm" data-acc-logout>Đăng xuất</button>
       </div>
     </header>
+    <div data-acc-ann-bar-host>${renderAnnouncementBarHtml(getLiveAnnouncements())}</div>
 
     <main class="admin-wrap">
       <div class="panel-card" style="margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
@@ -2330,6 +2602,28 @@ async function renderCustomerAccountView() {
   appRoot.querySelector('[data-acc-book]')?.addEventListener('click', () => openBookingModal(settings));
   appRoot.querySelector('[data-acc-qr]')?.addEventListener('click', () => openPaymentQrModal({ pkgIdx: 1, settings }));
   appRoot.querySelector('[data-acc-logout]')?.addEventListener('click', async () => { await storage.authLogout(); showToast('Đã đăng xuất', 'info'); navigateTo({ view: 'store' }); });
+  const bindAccountAnnouncementUi = () => {
+    appRoot.querySelectorAll('[data-open-announcements]').forEach(b => {
+      if (b.dataset.annBound) return;
+      b.dataset.annBound = '1';
+      b.addEventListener('click', () => openAnnouncementsModal(b.dataset.openAnnouncements || ''));
+    });
+    const barHost = appRoot.querySelector('[data-acc-ann-bar-host]');
+    if (!barHost) return;
+    barHost.querySelectorAll('[data-ann-bar-step]').forEach(b => b.addEventListener('click', () => {
+      const total = getLiveAnnouncements().length;
+      if (total > 1) {
+        activeAnnouncementIdx = ((activeAnnouncementIdx + Number(b.dataset.annBarStep)) % total + total) % total;
+        barHost.innerHTML = renderAnnouncementBarHtml(getLiveAnnouncements());
+        bindAccountAnnouncementUi();
+      }
+    }));
+    barHost.querySelector('[data-ann-bar-hide]')?.addEventListener('click', () => {
+      annBarCollapsedThisView = true;
+      barHost.innerHTML = '';
+    });
+  };
+  bindAccountAnnouncementUi();
   appRoot.querySelector('[data-link-social="facebook"]')?.addEventListener('click', () => {
     runFacebookSocialFlow({ mode: 'link', onSuccess: () => renderCustomerAccountView() });
   });
@@ -3178,11 +3472,19 @@ window.addEventListener('popstate', route);
   initGlobalWebFx();
   storage.onCloudReady = async () => {
     try {
+      const prevAnnSig = JSON.stringify(getLiveAnnouncements());
       publicStore = await storage.getPublicStore();
+      const nextAnnSig = JSON.stringify(getLiveAnnouncements());
       document.querySelectorAll('.brand-sub-status .status-dot.local').forEach(dot => {
         dot.classList.remove('local');
         dot.classList.add('online');
       });
+      const roleNow = new URLSearchParams(window.location.search).get('role') || '';
+      if (!roleNow && nextAnnSig !== prevAnnSig) {
+        const spNow = new URLSearchParams(window.location.search);
+        await renderShowroom(spNow.has('blank') ? spNow.get('blank') === '1' : true);
+        return;
+      }
       if (chatOpen) {
         currentChatThread = await storage.getChatThread();
         renderChatWidget(publicStore?.settings || {});

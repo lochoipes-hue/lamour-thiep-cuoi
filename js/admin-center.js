@@ -55,6 +55,7 @@ export class AdminManagementCenter {
     this.orderFilter = 'all';
     this.orderSearch = '';
     this.bookingFilter = 'all';
+    this.editingAnnouncementId = '';
     this.pollTimer = null;
     this.unsubSync = null;
     this.lastThreadsSignature = JSON.stringify(this.db.chatThreads || []);
@@ -67,6 +68,7 @@ export class AdminManagementCenter {
     if (!Array.isArray(this.db.bookings)) this.db.bookings = [];
     if (!Array.isArray(this.db.chatThreads)) this.db.chatThreads = [];
     if (!Array.isArray(this.db.consultations)) this.db.consultations = [];
+    if (!Array.isArray(this.db.announcements)) this.db.announcements = [];
     if (!this.db.chatbotConfig) this.db.chatbotConfig = JSON.parse(JSON.stringify(DEFAULT_CHATBOT_CONFIG));
   }
 
@@ -214,6 +216,8 @@ export class AdminManagementCenter {
     const bookings = this.db.bookings || [];
     const threads = this.db.chatThreads || [];
     const consults = this.db.consultations || [];
+    const announcements = this.db.announcements || [];
+    const activeAnnouncementsCount = announcements.filter(a => a && a.active !== false).length;
 
     const unreadChats = threads.reduce((s, t) => s + Number(t.unreadByAdmin || 0), 0);
     const pendingBookings = bookings.filter(b => b.status === 'pending').length;
@@ -264,7 +268,11 @@ export class AdminManagementCenter {
             <small style="opacity:0.65;">${(this.db.templates || []).length}</small>
           </button>
 
-          <div class="admin-side-group">Chăm Sóc Trực Tiếp</div>
+          <div class="admin-side-group">Chăm Sóc &amp; Thông Báo</div>
+          <button type="button" class="admin-side-btn ${this.activeTab === 'announcements' ? 'active' : ''}" data-side-tab="announcements">
+            <span style="display:inline-flex;align-items:center;gap:6px;">${icon('megaphone', 14)} Thông Báo Mọi Người</span>
+            <span class="admin-side-count" data-side-ann-badge style="${activeAnnouncementsCount > 0 ? '' : 'display:none;'}">${activeAnnouncementsCount}</span>
+          </button>
           <button type="button" class="admin-side-btn ${this.activeTab === 'livechat' ? 'active' : ''}" data-side-tab="livechat">
             <span>Khung Chat Trực Tiếp</span>
             <span class="admin-side-count" data-side-chat-badge style="${unreadChats > 0 ? '' : 'display:none;'}">${unreadChats}</span>
@@ -333,6 +341,7 @@ export class AdminManagementCenter {
       case 'history': this.renderHistoryAndOrders(); break;
       case 'bookings': this.renderBookingsModule(); break;
       case 'templates': this.renderTemplatesModule(); break;
+      case 'announcements': this.renderAnnouncementsModule(); break;
       case 'livechat': this.renderLiveChatContent(); break;
       case 'chatbot': this.renderChatbotModule(); break;
       case 'users': this.renderUsersModule(); break;
@@ -1027,6 +1036,303 @@ export class AdminManagementCenter {
         this.closeModal();
         this.onOpenTemplateEditor(updated.id);
       }
+    });
+  }
+
+  /* ==========================================================================
+     3B. QUẢN LÝ THÔNG BÁO TOÀN TRANG (LƯU VĨNH VIỄN ĐẾN KHI SỬA / XÓA)
+     ========================================================================== */
+  renderAnnouncementsModule() {
+    const host = this.root.querySelector('#admin-module-root');
+    if (!host) return;
+    const list = Array.isArray(this.db.announcements) ? this.db.announcements : [];
+    const editing = this.editingAnnouncementId
+      ? list.find(a => a && a.id === this.editingAnnouncementId) || null
+      : null;
+    if (this.editingAnnouncementId && !editing) this.editingAnnouncementId = '';
+
+    const typeLabels = {
+      promo: 'Ưu Đãi & Khuyến Mãi',
+      info: 'Thông Báo Chung',
+      important: 'Thông Báo Quan Trọng',
+      maintenance: 'Cập Nhật & Bảo Trì',
+    };
+    const typeShort = {
+      promo: 'Ưu Đãi',
+      info: 'Thông Báo',
+      important: 'Quan Trọng',
+      maintenance: 'Cập Nhật',
+    };
+
+    const formTitle = editing?.title || '';
+    const formContent = editing?.content || '';
+    const formType = editing?.type || 'promo';
+    const formCtaLabel = editing?.ctaLabel || '';
+    const formCtaUrl = editing?.ctaUrl || '';
+    const formPinned = editing ? Boolean(editing.pinned) : true;
+    const formActive = editing ? editing.active !== false : true;
+
+    const activeCount = list.filter(a => a && a.active !== false).length;
+
+    host.innerHTML = `
+      <div class="panel-card" style="margin-bottom:18px;background:linear-gradient(135deg,#fffdf9,#faf3e6);border-color:rgba(193,150,76,0.35);">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div>
+            <h3 style="margin:0 0 4px;font-size:17px;display:flex;align-items:center;gap:8px;color:var(--ui-brand);">
+              ${icon('megaphone', 17)} Thông Báo Toàn Trang Gửi Mọi Người
+            </h3>
+            <small style="color:var(--ui-muted);line-height:1.5;display:block;">
+              Mọi thông báo đăng tại đây được <strong>lưu vĩnh viễn trên cơ sở dữ liệu đám mây</strong> và hiển thị tự động cho tất cả khách truy cập trang chủ &amp; tài khoản — không tự mất cho đến khi bạn chủ động sửa, tạm ẩn hoặc xóa.
+            </small>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <span class="badge badge-paid">${activeCount} đang hiển thị</span>
+            <span class="badge badge-trial">${list.length} tổng đã lưu</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ann-admin-grid">
+        <div class="panel-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:14px;">
+            <h4 style="margin:0;font-size:15px;">${editing ? 'Chỉnh Sửa Thông Báo Đang Lưu' : 'Soạn & Đăng Thông Báo Mới'}</h4>
+            ${editing ? `<button type="button" class="btn btn-ghost btn-xs" id="btn-ann-cancel-edit">Hủy sửa</button>` : ''}
+          </div>
+
+          <form id="admin-announcement-form">
+            <div class="form-group">
+              <label>Tiêu đề thông báo *</label>
+              <input class="input" id="ann-inp-title" name="title" required maxlength="160" value="${escapeHtml(formTitle)}" placeholder="VD: Ưu đãi mùa cưới tháng 12 — Giảm ngay gói Cao Cấp" />
+            </div>
+
+            <div class="form-group">
+              <label>Phân loại hiển thị</label>
+              <select class="select" id="ann-inp-type" name="type">
+                ${Object.entries(typeLabels).map(([k, v]) => `<option value="${k}" ${formType === k ? 'selected' : ''}>${v}</option>`).join('')}
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label>Nội dung chi tiết gửi mọi người *</label>
+              <textarea class="textarea" id="ann-inp-content" name="content" rows="4" required maxlength="2000" placeholder="Nhập nội dung thông báo chi tiết cho khách hàng (hỗ trợ xuống dòng)...">${escapeHtml(formContent)}</textarea>
+            </div>
+
+            <div class="grid-2">
+              <div class="form-group">
+                <label>Nhãn nút bấm kèm theo (tùy chọn)</label>
+                <input class="input" id="ann-inp-cta-label" name="ctaLabel" maxlength="50" value="${escapeHtml(formCtaLabel)}" placeholder="VD: Xem Bảng Giá / Nhắn Zalo" />
+              </div>
+              <div class="form-group">
+                <label>Đường dẫn nút bấm (tùy chọn)</label>
+                <input class="input" id="ann-inp-cta-url" name="ctaUrl" maxlength="500" value="${escapeHtml(formCtaUrl)}" placeholder="VD: #bang-gia hoặc https://zalo.me/0354248177" />
+              </div>
+            </div>
+
+            <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0 14px;font-size:12.5px;">
+              <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-weight:600;">
+                <input type="checkbox" id="ann-inp-pinned" name="pinned" ${formPinned ? 'checked' : ''} />
+                <span>Ghim nổi bật lên đầu trang</span>
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:7px;cursor:pointer;font-weight:600;">
+                <input type="checkbox" id="ann-inp-active" name="active" ${formActive ? 'checked' : ''} />
+                <span>Hiển thị ngay cho mọi người</span>
+              </label>
+            </div>
+
+            <div style="margin-bottom:14px;">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;color:var(--ui-muted);margin-bottom:7px;">Xem Trước Hiển Thị Thực Tế</div>
+              <div id="ann-live-preview-host"></div>
+            </div>
+
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="submit" id="btn-ann-submit" class="btn btn-primary" style="flex:1;">
+                ${editing ? 'Lưu Chỉnh Sửa Thông Báo' : 'Đăng Thông Báo Lên Toàn Web'}
+              </button>
+              ${editing ? `<button type="button" class="btn btn-outline" id="btn-ann-cancel-edit-2">Hủy</button>` : ''}
+            </div>
+          </form>
+        </div>
+
+        <div class="panel-card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:14px;">
+            <h4 style="margin:0;font-size:15px;">Danh Sách Thông Báo Đang Lưu (${list.length})</h4>
+            <button type="button" class="btn btn-outline btn-xs" id="btn-ann-refresh">Làm mới</button>
+          </div>
+
+          ${list.length === 0 ? `
+            <div style="text-align:center;padding:34px 16px;border:1px dashed var(--ui-border);border-radius:14px;color:var(--ui-muted);font-size:13px;">
+              <div style="margin-bottom:8px;color:var(--ui-brand);">${icon('bell', 24)}</div>
+              <strong>Chưa có thông báo nào được đăng</strong>
+              <p style="margin:6px 0 0;font-size:12px;">Hãy soạn thông báo ở khung bên trái để gửi tin tức, khuyến mãi hoặc lịch làm việc lên trang chủ cho mọi người.</p>
+            </div>
+          ` : list.map(ann => {
+            const isHidden = ann.active === false;
+            const isEditRow = ann.id === this.editingAnnouncementId;
+            return `
+              <div class="ann-admin-item ${isHidden ? 'is-hidden' : ''} ${isEditRow ? 'is-editing' : ''}">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                    <span class="ann-type-badge type-${escapeHtml(ann.type || 'info')}">${escapeHtml(typeShort[ann.type] || 'Thông Báo')}</span>
+                    ${ann.pinned ? `<span class="badge badge-gold">${icon('pin', 11)} Đã ghim</span>` : ''}
+                    <span class="badge ${isHidden ? 'badge-trial' : 'badge-paid'}">${isHidden ? 'Đang tạm ẩn' : 'Đang hiển thị'}</span>
+                  </div>
+                  <small style="font-size:11px;color:var(--ui-muted);">${formatDateTime(ann.updatedAt || ann.createdAt)}</small>
+                </div>
+
+                <h5 style="margin:0 0 5px;font-size:15px;color:var(--ui-text);">${escapeHtml(ann.title)}</h5>
+                <p style="margin:0 0 10px;font-size:12.5px;color:var(--ui-muted);line-height:1.58;white-space:pre-line;">${escapeHtml(ann.content)}</p>
+
+                ${ann.ctaLabel && ann.ctaUrl ? `
+                  <div style="font-size:11.5px;color:var(--ui-brand);margin-bottom:10px;">
+                    Nút đi kèm: <strong>${escapeHtml(ann.ctaLabel)}</strong> → <code>${escapeHtml(ann.ctaUrl)}</code>
+                  </div>
+                ` : ''}
+
+                <div style="display:flex;gap:6px;flex-wrap:wrap;padding-top:8px;border-top:1px solid #f1ede6;">
+                  <button type="button" class="btn btn-primary btn-xs" data-ann-edit="${escapeHtml(ann.id)}">${icon('pen', 12)} Sửa</button>
+                  <button type="button" class="btn btn-outline btn-xs" data-ann-pin="${escapeHtml(ann.id)}">${icon('pin', 12)} ${ann.pinned ? 'Bỏ ghim' : 'Ghim đầu'}</button>
+                  <button type="button" class="btn btn-outline btn-xs" data-ann-toggle="${escapeHtml(ann.id)}">${icon(isHidden ? 'eye' : 'eyeOff', 12)} ${isHidden ? 'Hiện lại' : 'Tạm ẩn'}</button>
+                  <button type="button" class="btn btn-danger btn-xs" data-ann-del="${escapeHtml(ann.id)}">${icon('trash', 12)} Xóa</button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+
+    const updateLivePreview = () => {
+      const pHost = host.querySelector('#ann-live-preview-host');
+      if (!pHost) return;
+      const tVal = host.querySelector('#ann-inp-title')?.value.trim() || 'Tiêu đề thông báo sẽ hiển thị tại đây';
+      const cVal = host.querySelector('#ann-inp-content')?.value.trim() || 'Nội dung chi tiết gửi đến tất cả khách truy cập DaiLo Wedding...';
+      const tyVal = host.querySelector('#ann-inp-type')?.value || 'promo';
+      const ctaL = host.querySelector('#ann-inp-cta-label')?.value.trim() || '';
+      const pinnedVal = host.querySelector('#ann-inp-pinned')?.checked;
+      pHost.innerHTML = `
+        <div class="ann-public-card type-${escapeHtml(tyVal)}">
+          <div class="ann-card-meta">
+            <span class="ann-type-badge type-${escapeHtml(tyVal)}">${escapeHtml(typeShort[tyVal] || 'Thông Báo')}</span>
+            ${pinnedVal ? `<span class="badge badge-gold">${icon('pin', 11)} Nổi bật</span>` : ''}
+          </div>
+          <h4 class="ann-card-title">${escapeHtml(tVal)}</h4>
+          <p class="ann-card-body">${escapeHtml(cVal)}</p>
+          <div class="ann-card-foot">
+            <span>Quản Lý DaiLo Wedding • Vừa xong</span>
+            ${ctaL ? `<span class="btn btn-primary btn-xs" style="pointer-events:none;">${escapeHtml(ctaL)}</span>` : ''}
+          </div>
+        </div>
+      `;
+    };
+    updateLivePreview();
+
+    ['#ann-inp-title', '#ann-inp-content', '#ann-inp-type', '#ann-inp-cta-label', '#ann-inp-pinned'].forEach(sel => {
+      host.querySelector(sel)?.addEventListener('input', updateLivePreview);
+      host.querySelector(sel)?.addEventListener('change', updateLivePreview);
+    });
+
+    const cancelEdit = () => {
+      this.editingAnnouncementId = '';
+      this.renderAnnouncementsModule();
+    };
+    host.querySelector('#btn-ann-cancel-edit')?.addEventListener('click', cancelEdit);
+    host.querySelector('#btn-ann-cancel-edit-2')?.addEventListener('click', cancelEdit);
+
+    host.querySelector('#btn-ann-refresh')?.addEventListener('click', async () => {
+      try {
+        const fresh = await storage.getAdminDb();
+        this.db.announcements = fresh.announcements || [];
+        this.renderShell();
+        this.showToast('Đã đồng bộ danh sách thông báo mới nhất', 'info');
+      } catch (_) {}
+    });
+
+    host.querySelector('#admin-announcement-form')?.addEventListener('submit', async e => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const title = (fd.get('title') || '').toString().trim();
+      const content = (fd.get('content') || '').toString().trim();
+      if (!title || !content) {
+        this.showToast('Vui lòng nhập đầy đủ tiêu đề và nội dung thông báo', 'error');
+        return;
+      }
+      const btn = host.querySelector('#btn-ann-submit');
+      if (btn) { btn.disabled = true; btn.textContent = 'Đang lưu thông báo...'; }
+      try {
+        const res = await storage.adminSaveAnnouncement({
+          id: this.editingAnnouncementId || '',
+          title,
+          content,
+          type: (fd.get('type') || 'info').toString(),
+          ctaLabel: (fd.get('ctaLabel') || '').toString().trim(),
+          ctaUrl: (fd.get('ctaUrl') || '').toString().trim(),
+          pinned: Boolean(host.querySelector('#ann-inp-pinned')?.checked),
+          active: Boolean(host.querySelector('#ann-inp-active')?.checked),
+        });
+        this.db.announcements = res.announcements || this.db.announcements;
+        const wasEdit = Boolean(this.editingAnnouncementId);
+        this.editingAnnouncementId = '';
+        this.showToast(
+          wasEdit
+            ? 'Đã lưu chỉnh sửa thông báo và cập nhật ngay lên trang web!'
+            : 'Đã đăng thông báo thành công! Thông báo được lưu vĩnh viễn cho mọi người đến khi bạn sửa hoặc xóa.',
+          'success'
+        );
+        this.renderShell();
+      } catch (err) {
+        this.showToast(err.message || 'Không thể lưu thông báo', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = editing ? 'Lưu Chỉnh Sửa Thông Báo' : 'Đăng Thông Báo Lên Toàn Web'; }
+      }
+    });
+
+    host.querySelectorAll('[data-ann-edit]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this.editingAnnouncementId = btn.dataset.annEdit;
+        this.renderAnnouncementsModule();
+        host.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
+    });
+
+    host.querySelectorAll('[data-ann-pin]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          const res = await storage.adminToggleAnnouncement(btn.dataset.annPin, { field: 'pinned' });
+          this.db.announcements = res.announcements || this.db.announcements;
+          this.showToast(res.announcement?.pinned ? 'Đã ghim thông báo lên đầu trang' : 'Đã bỏ ghim thông báo', 'success');
+          this.renderShell();
+        } catch (err) {
+          this.showToast(err.message || 'Lỗi cập nhật ghim', 'error');
+        }
+      });
+    });
+
+    host.querySelectorAll('[data-ann-toggle]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          const res = await storage.adminToggleAnnouncement(btn.dataset.annToggle, { field: 'active' });
+          this.db.announcements = res.announcements || this.db.announcements;
+          this.showToast(res.announcement?.active ? 'Đã bật hiển thị lại thông báo cho mọi người' : 'Đã tạm ẩn thông báo (dữ liệu vẫn được lưu)', 'success');
+          this.renderShell();
+        } catch (err) {
+          this.showToast(err.message || 'Lỗi thay đổi trạng thái', 'error');
+        }
+      });
+    });
+
+    host.querySelectorAll('[data-ann-del]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Xác nhận xóa vĩnh viễn thông báo này khỏi hệ thống?')) return;
+        const id = btn.dataset.annDel;
+        try {
+          const res = await storage.adminDeleteAnnouncement(id);
+          this.db.announcements = res.announcements || [];
+          if (this.editingAnnouncementId === id) this.editingAnnouncementId = '';
+          this.showToast('Đã xóa vĩnh viễn thông báo', 'success');
+          this.renderShell();
+        } catch (err) {
+          this.showToast(err.message || 'Không thể xóa thông báo', 'error');
+        }
+      });
     });
   }
 

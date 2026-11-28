@@ -468,6 +468,7 @@ class StorageService {
           createdAt: new Date().toISOString(),
         },
       ];
+      seed.announcements = Array.isArray(seed.announcements) ? seed.announcements : [];
       localStorage.setItem(LOCAL_KEY, JSON.stringify(seed));
       return;
     }
@@ -522,6 +523,10 @@ class StorageService {
         if (admin && typeof admin.name === 'string' && /l['’]?amour(\s+atelier)?/i.test(admin.name)) {
           admin.name = admin.name.replace(legacyBrandRe, 'DaiLo Wedding');
         }
+        changed = true;
+      }
+      if (!Array.isArray(db.announcements)) {
+        db.announcements = [];
         changed = true;
       }
       if (changed) localStorage.setItem(LOCAL_KEY, JSON.stringify(db));
@@ -968,14 +973,157 @@ class StorageService {
       }
     }
     const db = this.readLocalDb();
+    const activeAnnouncements = [...(db.announcements || [])]
+      .filter(a => a && a.active !== false)
+      .sort((a, b) => ((b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) || ((Date.parse(b.updatedAt || b.createdAt || '') || 0) - (Date.parse(a.updatedAt || a.createdAt || '') || 0)));
     return {
       ok: true,
       initialized: true,
       settings: db.settings || {},
       templates: db.templates || [],
+      announcements: activeAnnouncements,
       chatbotConfig: db.chatbotConfig || DEFAULT_CHATBOT_CONFIG,
       oauth: this.oauthInfo || {},
     };
+  }
+
+  /* ===================== PERSISTENT ADMIN ANNOUNCEMENTS ===================== */
+  sortAnnouncementsLocal(list) {
+    return [...(Array.isArray(list) ? list : [])]
+      .filter(a => a && a.id)
+      .sort((a, b) => {
+        const pinDiff = (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0);
+        if (pinDiff !== 0) return pinDiff;
+        return (Date.parse(b.updatedAt || b.createdAt || '') || 0) - (Date.parse(a.updatedAt || a.createdAt || '') || 0);
+      });
+  }
+
+  sanitizeAnnouncementUrlLocal(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    if (s.startsWith('#') || s.startsWith('?') || (s.startsWith('/') && !s.startsWith('//'))) return s.slice(0, 300);
+    try {
+      const u = new URL(s);
+      if (u.protocol === 'https:' || u.protocol === 'http:') return u.toString().slice(0, 500);
+    } catch (_) {}
+    return '';
+  }
+
+  async getPublicAnnouncements() {
+    if (this.isCloudOnline()) {
+      const res = await fetch(this.apiUrl('action=announcements'), { cache: 'no-store' });
+      const data = await res.json();
+      if (res.ok && data.ok) return Array.isArray(data.announcements) ? data.announcements : [];
+    }
+    const db = this.readLocalDb();
+    return this.sortAnnouncementsLocal((db.announcements || []).filter(a => a && a.active !== false));
+  }
+
+  async adminSaveAnnouncement(payload) {
+    if (this.isCloudOnline()) {
+      const res = await fetch(this.apiUrl('action=admin_announcement_save'), {
+        method: 'POST',
+        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể lưu thông báo');
+      return data;
+    }
+    if (!this.currentUser || this.currentUser.role !== 'admin') throw new Error('Chỉ Quản trị viên mới được đăng thông báo');
+    const title = String(payload?.title || '').trim().slice(0, 160);
+    const content = String(payload?.content || '').trim().slice(0, 2000);
+    if (!title) throw new Error('Vui lòng nhập tiêu đề thông báo');
+    if (!content) throw new Error('Vui lòng nhập nội dung thông báo');
+    const validTypes = new Set(['info', 'promo', 'important', 'maintenance']);
+    const type = validTypes.has(String(payload?.type || 'info')) ? String(payload.type) : 'info';
+    const ctaLabel = String(payload?.ctaLabel || '').trim().slice(0, 50);
+    const ctaUrl = this.sanitizeAnnouncementUrlLocal(payload?.ctaUrl || '');
+    const pinned = Boolean(payload?.pinned);
+    const active = payload?.active !== false;
+    const nowIso = new Date().toISOString();
+
+    const db = this.readLocalDb();
+    db.announcements = Array.isArray(db.announcements) ? db.announcements : [];
+    const idx = payload?.id ? db.announcements.findIndex(a => a && a.id === payload.id) : -1;
+    let saved;
+    if (idx !== -1) {
+      saved = {
+        ...db.announcements[idx],
+        title,
+        content,
+        type,
+        ctaLabel,
+        ctaUrl,
+        pinned,
+        active,
+        updatedAt: nowIso,
+        updatedBy: this.currentUser.name || 'Quản Trị Viên DaiLo Wedding',
+      };
+      db.announcements[idx] = saved;
+    } else {
+      saved = {
+        id: 'ann_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-3),
+        title,
+        content,
+        type,
+        ctaLabel,
+        ctaUrl,
+        pinned,
+        active,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        createdBy: this.currentUser.name || 'Quản Trị Viên DaiLo Wedding',
+      };
+      db.announcements.unshift(saved);
+    }
+    db.announcements = this.sortAnnouncementsLocal(db.announcements);
+    this.writeLocalDb(db);
+    return { ok: true, announcement: saved, announcements: db.announcements };
+  }
+
+  async adminToggleAnnouncement(id, patch = {}) {
+    if (this.isCloudOnline()) {
+      const res = await fetch(this.apiUrl('action=admin_announcement_toggle'), {
+        method: 'POST',
+        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ id, ...patch }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể cập nhật trạng thái thông báo');
+      return data;
+    }
+    if (!this.currentUser || this.currentUser.role !== 'admin') throw new Error('Cần quyền Quản trị viên');
+    const db = this.readLocalDb();
+    db.announcements = Array.isArray(db.announcements) ? db.announcements : [];
+    const item = db.announcements.find(a => a && a.id === id);
+    if (!item) throw new Error('Không tìm thấy thông báo');
+    if (typeof patch.active === 'boolean') item.active = patch.active;
+    else if (patch.field === 'active') item.active = item.active === false;
+    if (typeof patch.pinned === 'boolean') item.pinned = patch.pinned;
+    else if (patch.field === 'pinned') item.pinned = !item.pinned;
+    item.updatedAt = new Date().toISOString();
+    db.announcements = this.sortAnnouncementsLocal(db.announcements);
+    this.writeLocalDb(db);
+    return { ok: true, announcement: item, announcements: db.announcements };
+  }
+
+  async adminDeleteAnnouncement(id) {
+    if (this.isCloudOnline()) {
+      const res = await fetch(this.apiUrl('action=admin_announcement_delete'), {
+        method: 'POST',
+        headers: this.authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ id }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) throw new Error(data.error || 'Không thể xóa thông báo');
+      return data;
+    }
+    if (!this.currentUser || this.currentUser.role !== 'admin') throw new Error('Cần quyền Quản trị viên');
+    const db = this.readLocalDb();
+    db.announcements = (db.announcements || []).filter(a => a && a.id !== id);
+    this.writeLocalDb(db);
+    return { ok: true, deletedId: id, announcements: this.sortAnnouncementsLocal(db.announcements) };
   }
 
   async getCustomerPortalData() {

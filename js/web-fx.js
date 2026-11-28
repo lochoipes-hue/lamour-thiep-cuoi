@@ -1,13 +1,16 @@
 /**
- * DaiLo Wedding — Luxury Web Interaction FX Engine
- * - Hiệu ứng gợn sáng vàng hồng & hạt bụi ánh kim nhẹ khi click bất kỳ nút / thẻ nào
- * - Hiệu ứng nghiêng 3D + vệt ánh sáng champagne khi rê chuột qua poster mẫu & thẻ giá
+ * DaiLo Wedding — Luxury Web Interaction FX Engine (v16)
+ * - Hiệu ứng gợn sáng vàng hồng & hạt bụi ánh kim nhẹ khi click
+ * - Hiệu ứng nghiêng 3D + vệt ánh sáng champagne khi rê chuột qua poster mẫu, thẻ giá & thẻ hiệu ứng
+ * - Thanh tiến trình đọc + độ nổi kính mờ thanh điều hướng + thanh Dock nổi tự động đánh dấu mục đang xem
  * - Hiệu ứng xuất hiện mượt mà theo cuộn (Scroll Reveal Stagger)
  */
 
 let fxInitialized = false;
+let activeScrollCleanup = null;
 
 function spawnClickSparkles(x, y) {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
   const ripple = document.createElement('span');
   ripple.className = 'fx-click-ripple';
   ripple.style.left = `${x}px`;
@@ -43,19 +46,21 @@ export function initGlobalWebFx() {
 }
 
 export function bindInteractiveTiltCards(root = document) {
-  const cards = root.querySelectorAll('.poster-card, .price-card');
+  const cards = root.querySelectorAll('.poster-card, .price-card, .fx-showcase-card, .hero-trust-tile');
   cards.forEach(card => {
     if (card.dataset.tiltBound) return;
     card.dataset.tiltBound = '1';
 
     card.addEventListener('pointermove', e => {
       if (window.innerWidth < 820) return;
+      if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
       const rect = card.getBoundingClientRect();
       const px = (e.clientX - rect.left) / rect.width;
       const py = (e.clientY - rect.top) / rect.height;
-      const rx = (0.5 - py) * 7;
-      const ry = (px - 0.5) * 7;
-      card.style.transform = `perspective(900px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) translateY(-6px)`;
+      const maxTilt = card.classList.contains('hero-trust-tile') ? 4.5 : 6.5;
+      const rx = (0.5 - py) * maxTilt;
+      const ry = (px - 0.5) * maxTilt;
+      card.style.transform = `perspective(960px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) translateY(-6px)`;
       card.style.setProperty('--mx', `${Math.round(px * 100)}%`);
       card.style.setProperty('--my', `${Math.round(py * 100)}%`);
     });
@@ -68,7 +73,11 @@ export function bindInteractiveTiltCards(root = document) {
 
 export function bindScrollStagger(root = document) {
   const items = root.querySelectorAll('[data-reveal]');
-  if (!items.length || !('IntersectionObserver' in window)) return;
+  if (!items.length) return;
+  if (!('IntersectionObserver' in window)) {
+    items.forEach(el => el.classList.add('is-shown'));
+    return;
+  }
   const obs = new IntersectionObserver(
     entries => {
       entries.forEach(ent => {
@@ -78,10 +87,74 @@ export function bindScrollStagger(root = document) {
         }
       });
     },
-    { threshold: 0.08 }
+    { threshold: 0.06, rootMargin: '0px 0px -24px 0px' }
   );
   items.forEach((el, idx) => {
     el.style.transitionDelay = `${Math.min(idx % 5, 4) * 65}ms`;
     obs.observe(el);
   });
+}
+
+export function bindSiteScrollProgress(root = document) {
+  if (typeof activeScrollCleanup === 'function') {
+    activeScrollCleanup();
+    activeScrollCleanup = null;
+  }
+  const progressBar = root.querySelector('[data-site-scroll-bar]');
+  const topNav = root.querySelector('.top-nav');
+  const dock = root.querySelector('[data-site-dock]');
+  const dockLinks = Array.from(root.querySelectorAll('[data-site-jump]'));
+
+  const onScroll = () => {
+    const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+    const maxScroll = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+    if (progressBar) {
+      progressBar.style.width = `${Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100))}%`;
+    }
+    if (topNav) {
+      topNav.classList.toggle('is-scrolled', scrollTop > 18);
+    }
+    if (dock) {
+      dock.classList.toggle('is-visible', scrollTop > 220);
+    }
+  };
+
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  let dockObs = null;
+  if (dockLinks.length && 'IntersectionObserver' in window) {
+    const targets = dockLinks
+      .map(btn => root.querySelector(btn.dataset.siteJump))
+      .filter(Boolean);
+    dockObs = new IntersectionObserver(
+      entries => {
+        const best = entries
+          .filter(e => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!best || !best.target.id) return;
+        const hash = `#${best.target.id}`;
+        dockLinks.forEach(btn => btn.classList.toggle('is-active', btn.dataset.siteJump === hash));
+      },
+      { rootMargin: '-22% 0px -48% 0px', threshold: [0.08, 0.3] }
+    );
+    targets.forEach(t => dockObs.observe(t));
+  }
+
+  dockLinks.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = root.querySelector(btn.dataset.siteJump);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+
+  root.querySelector('[data-site-top]')?.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  activeScrollCleanup = () => {
+    window.removeEventListener('scroll', onScroll);
+    if (dockObs) dockObs.disconnect();
+  };
+  return activeScrollCleanup;
 }
