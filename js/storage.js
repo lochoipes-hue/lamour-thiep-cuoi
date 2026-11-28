@@ -1519,16 +1519,19 @@ class StorageService {
   }
 
   /* ===================== INVITATIONS & MEDIA ===================== */
-  async getInvitation(id, mode = 'guest', token = '', { blank = false } = {}) {
+  async getInvitation(id, mode = 'guest', token = '', { blank = false, shareCode = '' } = {}) {
     if (this.isCloudOnline()) {
       const blankQs = blank ? '&blank=1' : '';
-      const url = this.apiUrl(`action=get_invitation&id=${encodeURIComponent(id)}&mode=${encodeURIComponent(mode)}${blankQs}`);
+      const tsQs = shareCode ? `&ts=${encodeURIComponent(shareCode)}` : '';
+      const url = this.apiUrl(`action=get_invitation&id=${encodeURIComponent(id)}&mode=${encodeURIComponent(mode)}${blankQs}${tsQs}`);
       const headers = this.authHeaders(token ? { 'X-Client-Token': token } : {});
       const res = await fetch(url, { headers, cache: 'no-store' });
       const data = await res.json();
       if (!res.ok || !data.ok) {
         const err = new Error(data.error || 'Không tìm thấy thiệp');
         if (data.paymentRequired) err.paymentRequired = true;
+        if (data.linkRevoked) err.linkRevoked = true;
+        if (data.trialExpired) err.trialExpired = true;
         throw err;
       }
       if (data.invitation) this.resolveInvitationMedia(data.invitation);
@@ -1538,26 +1541,56 @@ class StorageService {
     const db = this.readLocalDb();
     const found = (db.invitations || []).find(i => i.id === id);
     if (!found) throw new Error('Không tìm thấy thiệp cưới này');
+    const isAdminUser = this.currentUser?.role === 'admin';
     if (mode === 'client') {
       const uEmail = (this.currentUser?.email || '').toLowerCase();
       const uPhone = (this.currentUser?.phone || '').replace(/[^0-9+]/g, '');
       const ok = found.clientToken === token
-        || this.currentUser?.role === 'admin'
+        || isAdminUser
         || (this.currentUser && found.order?.userId === this.currentUser.id)
         || (uEmail && (found.order?.customerEmail || '').toLowerCase() === uEmail)
         || (uPhone.length >= 8 && (found.order?.customerPhone || '').replace(/[^0-9+]/g, '') === uPhone);
       if (!ok) throw new Error('Mã truy cập khách hàng không hợp lệ');
+      if (found.trial?.enabled && found.order?.status !== 'paid' && !found.trial.shareCode) {
+        found.trial.shareCode = 'tr_' + Math.random().toString(36).slice(2, 10);
+        this.writeLocalDb(db);
+      }
       return { ok: true, invitation: JSON.parse(JSON.stringify(found)), settings: db.settings || {}, templates: db.templates || [] };
     }
     const status = found.order?.status || 'trial';
-    const isPubliclyActive = status === 'paid' || status === 'deposit' || Boolean(found.trial?.enabled) || this.currentUser?.role === 'admin';
+    const isPaidOrDeposit = status === 'paid' || status === 'deposit';
+    const isTrial = !isPaidOrDeposit && Boolean(found.trial?.enabled);
+    const isPubliclyActive = isPaidOrDeposit || isTrial || isAdminUser;
     if (!isPubliclyActive && !blank) {
       const err = new Error('Thiệp cưới này đang ở bản nháp chưa thanh toán. Vui lòng hoàn tất thanh toán để kích hoạt đường link gửi khách mời.');
       err.paymentRequired = true;
       throw err;
     }
+    if (isTrial && !isAdminUser && !blank) {
+      if (found.trial.linkRevoked || found.permissions?.locked) {
+        const err = new Error('Liên kết mẫu dùng thử này đã bị khóa hoặc hủy liên kết. Vui lòng nâng cấp gói chính thức để mở lại thiệp.');
+        err.linkRevoked = true;
+        err.paymentRequired = true;
+        throw err;
+      }
+      const expMs = Date.parse(found.trial.expiresAt || '');
+      if (Number.isFinite(expMs) && expMs <= Date.now()) {
+        const err = new Error('Liên kết mẫu dùng thử đã hết thời hạn và tự động khóa. Vui lòng thanh toán nâng cấp gói chính thức để kích hoạt lại toàn bộ ảnh và nội dung.');
+        err.trialExpired = true;
+        err.linkRevoked = true;
+        err.paymentRequired = true;
+        throw err;
+      }
+      if (found.trial.shareCode && String(shareCode || '').trim() !== found.trial.shareCode) {
+        const err = new Error('Liên kết mẫu dùng thử cũ đã bị hủy liên kết hoặc không hợp lệ. Vui lòng lấy link dùng thử mới nhất hoặc nâng cấp gói chính thức.');
+        err.linkRevoked = true;
+        err.paymentRequired = true;
+        throw err;
+      }
+    }
     const guestSafe = JSON.parse(JSON.stringify(found));
     delete guestSafe.clientToken; delete guestSafe.guests; delete guestSafe.rsvps;
+    if (guestSafe.trial) delete guestSafe.trial.shareCode;
     guestSafe.order = { status, showWatermark: Boolean(found.order?.showWatermark) };
     guestSafe.wishes = (guestSafe.wishes || []).filter(w => !w.hidden);
     if (blank && !isPubliclyActive) {
@@ -1570,6 +1603,66 @@ class StorageService {
       guestSafe.wishes = [];
     }
     return { ok: true, invitation: guestSafe, settings: db.settings || {} };
+  }
+
+  async updateTrialLinkControl(invitationId, op = 'lock', { clientToken = '' } = {}) {
+    if (this.isCloudOnline()) {
+      const headers = this.authHeaders({
+        'Content-Type': 'application/json',
+        ...(clientToken ? { 'X-Client-Token': clientToken } : {}),
+      });
+      const res = await fetch(this.apiUrl(`action=trial_link_control&id=${encodeURIComponent(invitationId)}`), {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ op }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        const err = new Error(data.error || 'Không thể cập nhật trạng thái liên kết mẫu dùng thử');
+        if (data.linkRevoked) err.linkRevoked = true;
+        if (data.trialExpired) err.trialExpired = true;
+        throw err;
+      }
+      if (data.invitation) this.resolveInvitationMedia(data.invitation);
+      return data;
+    }
+    const db = this.readLocalDb();
+    const idx = (db.invitations || []).findIndex(i => i.id === invitationId);
+    if (idx === -1) throw new Error('Không tìm thấy thiệp cưới này');
+    const inv = db.invitations[idx];
+    const isAdmin = this.currentUser?.role === 'admin';
+    if (inv.order?.status === 'paid' || !inv.trial?.enabled) {
+      throw new Error('Tính năng khóa/hủy liên kết chỉ áp dụng cho mẫu dùng thử chưa thanh toán.');
+    }
+    const nowIso = new Date().toISOString();
+    const expMs = Date.parse(inv.trial.expiresAt || '');
+    const isExpired = Number.isFinite(expMs) && expMs <= Date.now();
+    const nextCode = 'tr_' + Math.random().toString(36).slice(2, 10);
+    if (op === 'lock') {
+      inv.trial.linkRevoked = true;
+      inv.trial.revokedAt = nowIso;
+      inv.trial.revokedBy = isAdmin ? 'admin' : 'client';
+      inv.trial.shareCode = nextCode;
+      if (isAdmin) inv.permissions = { ...(inv.permissions || {}), locked: true };
+    } else if (op === 'revoke' || op === 'rotate' || op === 'unlock') {
+      if (!isAdmin && inv.trial.linkRevoked && inv.trial.revokedBy === 'admin') {
+        throw new Error('Liên kết mẫu dùng thử này đã bị Quản trị viên khóa. Vui lòng thanh toán nâng cấp gói chính thức hoặc liên hệ Zalo 0354 248 177.');
+      }
+      if (!isAdmin && isExpired) {
+        throw new Error('Mẫu dùng thử đã hết thời hạn — vui lòng nâng cấp gói chính thức để mở lại link thiệp.');
+      }
+      inv.trial.linkRevoked = false;
+      inv.trial.revokedAt = '';
+      inv.trial.revokedBy = '';
+      inv.trial.shareCode = nextCode;
+      if (isAdmin && inv.permissions) inv.permissions.locked = false;
+    } else {
+      throw new Error('Thao tác không hợp lệ');
+    }
+    inv.updatedAt = nowIso;
+    db.invitations[idx] = inv;
+    this.writeLocalDb(db);
+    return { ok: true, invitation: JSON.parse(JSON.stringify(inv)), trial: inv.trial };
   }
 
   async clientUpdateInvitation(id, token, payload) {

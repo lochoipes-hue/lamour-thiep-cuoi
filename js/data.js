@@ -785,6 +785,10 @@ export function buildTrialConfig(days = 1) {
     days: d,
     startedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + d * 86400000).toISOString(),
+    shareCode: 'tr_' + Math.random().toString(36).slice(2, 10),
+    linkRevoked: false,
+    revokedAt: '',
+    revokedBy: '',
     limits: {
       maxPhotos,
       maxGuests,
@@ -799,11 +803,13 @@ export function buildTrialConfig(days = 1) {
 
 export function getTrialState(inv) {
   if (!inv || inv.order?.status === 'paid' || !inv.trial?.enabled) {
-    return { active: false, expired: false, days: 0, remainingMs: Infinity, remainingText: '', limits: null };
+    return { active: false, expired: false, linkRevoked: false, shareCode: '', revokedAt: '', revokedBy: '', days: 0, remainingMs: Infinity, remainingText: '', limits: null };
   }
   const expiresMs = new Date(inv.trial.expiresAt || 0).getTime();
   const remainingMs = Number.isFinite(expiresMs) ? expiresMs - Date.now() : 0;
   const expired = remainingMs <= 0;
+  const linkRevoked = Boolean(inv.trial.linkRevoked || inv.permissions?.locked);
+  const shareCode = String(inv.trial.shareCode || '').trim();
   let remainingText = 'Đã hết hạn dùng thử';
   if (!expired) {
     const totalMins = Math.max(1, Math.ceil(remainingMs / 60000));
@@ -825,7 +831,19 @@ export function getTrialState(inv) {
     allowSectionToggle: false,
     ...(inv.trial.limits || {}),
   };
-  return { active: true, expired, days: d, remainingMs, remainingText, expiresAt: inv.trial.expiresAt, limits };
+  return {
+    active: true,
+    expired,
+    linkRevoked,
+    shareCode,
+    revokedAt: inv.trial.revokedAt || '',
+    revokedBy: inv.trial.revokedBy || '',
+    days: d,
+    remainingMs,
+    remainingText,
+    expiresAt: inv.trial.expiresAt,
+    limits,
+  };
 }
 
 /**

@@ -13,6 +13,7 @@
 import {
   TEMPLATES,
   VIET_BANKS,
+  getTrialState,
   createInvitationFromTemplate,
 } from './data.js?v=15';
 import { COVER_BACKDROPS } from './artwork.js?v=15';
@@ -468,8 +469,22 @@ export class AdminManagementCenter {
                     <span class="badge ${inv.order?.status === 'paid' ? 'badge-paid' : inv.order?.status === 'deposit' ? 'badge-deposit' : 'badge-trial'}">
                       ${inv.order?.status === 'paid' ? 'Đã thanh toán' : inv.order?.status === 'deposit' ? 'Đặt cọc' : 'Dùng thử'}
                     </span>
+                    ${(() => {
+                      const ts = getTrialState(inv);
+                      if (!ts.active) return '';
+                      return `<div style="margin-top:4px;font-size:11px;color:${ts.linkRevoked || ts.expired ? '#9b1c28' : '#7b4f10'};font-weight:600;">${ts.linkRevoked ? 'Link thử: Đã khóa / hủy' : (ts.expired ? 'Link thử: Đã hết hạn' : `Link thử: ${escapeHtml(ts.remainingText)}`)}</div>`;
+                    })()}
                     ${inv.order?.status !== 'paid'
-                      ? `<div style="margin-top:5px;"><button type="button" class="btn btn-outline btn-xs" data-mark-paid="${escapeHtml(inv.id)}">Kích hoạt VIP</button></div>`
+                      ? `<div style="margin-top:5px;display:flex;gap:4px;flex-wrap:wrap;">
+                          <button type="button" class="btn btn-outline btn-xs" data-mark-paid="${escapeHtml(inv.id)}">Kích hoạt VIP</button>
+                          ${(() => {
+                            const ts = getTrialState(inv);
+                            if (!ts.active) return '';
+                            return ts.linkRevoked
+                              ? `<button type="button" class="btn btn-outline btn-xs" data-unlock-trial-link="${escapeHtml(inv.id)}">Mở Lại Link</button>`
+                              : `<button type="button" class="btn btn-danger btn-xs" data-lock-trial-link="${escapeHtml(inv.id)}">Khóa / Hủy Link</button>`;
+                          })()}
+                        </div>`
                       : `<div style="margin-top:5px;"><button type="button" class="btn btn-ghost btn-xs" style="color:var(--ui-muted);font-size:11px;" data-revoke-vip="${escapeHtml(inv.id)}">Thu hồi VIP</button></div>`}
                   </td>
                   <td style="font-size:12px;color:var(--ui-muted);">
@@ -588,10 +603,47 @@ export class AdminManagementCenter {
       });
     });
 
+    host.querySelectorAll('[data-lock-trial-link]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Khóa và hủy toàn bộ liên kết mẫu dùng thử của thiệp này? Người đang giữ link thử sẽ không thể mở xem nữa.')) return;
+        const id = btn.dataset.lockTrialLink;
+        try {
+          const res = await storage.updateTrialLinkControl(id, 'lock');
+          const inv = this.db.invitations.find(i => i.id === id);
+          if (inv && res?.invitation) {
+            inv.trial = res.invitation.trial;
+            inv.permissions = res.invitation.permissions;
+          }
+          this.onToast('Đã khóa và hủy liên kết mẫu dùng thử!', 'success');
+          this.renderHistoryAndOrders();
+        } catch (err) {
+          this.onToast(err.message || 'Không thể khóa liên kết dùng thử', 'error');
+        }
+      });
+    });
+
+    host.querySelectorAll('[data-unlock-trial-link]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.unlockTrialLink;
+        try {
+          const res = await storage.updateTrialLinkControl(id, 'unlock');
+          const inv = this.db.invitations.find(i => i.id === id);
+          if (inv && res?.invitation) {
+            inv.trial = res.invitation.trial;
+            inv.permissions = res.invitation.permissions;
+          }
+          this.onToast('Đã mở lại mẫu dùng thử với đường link mới (link cũ vẫn bị hủy)!', 'success');
+          this.renderHistoryAndOrders();
+        } catch (err) {
+          this.onToast(err.message || 'Không thể mở lại liên kết dùng thử', 'error');
+        }
+      });
+    });
+
     host.querySelectorAll('[data-edit-inv]').forEach(btn => btn.addEventListener('click', () => this.onOpenInvitationEditor(btn.dataset.editInv)));
     host.querySelectorAll('[data-links-inv]').forEach(btn => btn.addEventListener('click', () => {
       const inv = this.db.invitations.find(i => i.id === btn.dataset.linksInv);
-      if (inv) this.openShareLinksModal(inv, 'admin');
+      if (inv) this.openShareLinksModal(inv, 'admin', () => this.renderHistoryAndOrders());
     }));
     host.querySelectorAll('[data-dup-inv]').forEach(btn => btn.addEventListener('click', async () => {
       const src = this.db.invitations.find(i => i.id === btn.dataset.dupInv);

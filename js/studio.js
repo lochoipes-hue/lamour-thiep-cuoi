@@ -176,6 +176,7 @@ export class StudioEditor {
           </div>
           <div class="studio-topbar-right">
             ${isAdmin && !this.isTemplateEditor ? `<button type="button" class="btn btn-outline btn-sm" data-action="save-template">Lưu Thành Mẫu</button>` : ''}
+            ${!isAdmin && !isPaid && trialState.active ? `<button type="button" class="btn ${trialState.linkRevoked || trialState.expired ? 'btn-danger' : 'btn-outline'} btn-sm" data-action="trial-share-link">${trialState.linkRevoked ? 'Link Thử Đã Khóa' : (trialState.expired ? 'Hết Hạn Dùng Thử' : 'Lấy Link Dùng Thử')}</button>` : ''}
             <button type="button" class="btn ${!isAdmin && !isPaid ? 'btn-outline' : 'btn-primary'} btn-sm" data-action="save-all">${this.isTemplateEditor ? 'Lưu Mẫu Thiệp' : 'Lưu Thiệp'}</button>
             ${!isAdmin ? `<button type="button" class="btn ${isPaid ? 'btn-outline' : 'btn-gold'} btn-sm" data-action="go-checkout">${isPaid ? 'Xem Trang Bàn Giao' : 'Thanh Toán Ngay'}</button>` : ''}
           </div>
@@ -259,6 +260,20 @@ export class StudioEditor {
         desc: 'Mẫu độc quyền được thiết kế trong Studio.',
         design: deepClone(this.invitation.design),
       });
+    });
+
+    root.querySelector('[data-action="trial-share-link"]')?.addEventListener('click', async () => {
+      const ts = getTrialState(this.invitation);
+      if (ts.active && !ts.expired && !this.saving) {
+        try {
+          this.saving = true;
+          await this.onSave?.(deepClone(this.invitation));
+        } catch (_) {
+        } finally {
+          this.saving = false;
+        }
+      }
+      this.onOpenShareModal?.(this.invitation, this.mode);
     });
 
     root.querySelectorAll('[data-action="go-checkout"]').forEach(btn => {
@@ -1547,8 +1562,11 @@ export class StudioEditor {
         <div class="inspector-box" style="background:#fdf6e7;border-color:#e5cfa0;">
           <div style="font-size:12.5px;font-weight:700;color:#7b4f10;margin-bottom:5px;">${trialState.active ? `Giới Hạn Bản Dùng Thử ${trialState.days} Ngày` : 'Mở Khóa Sau Khi Thanh Toán'}</div>
           <p style="font-size:12px;color:#6e5630;margin:0 0 10px;line-height:1.55;">
-            Tạo đường link gửi khách mời mang tên riêng, mẫu tin nhắn mời Zalo hàng loạt và xuất file Excel RSVP sẽ tự động mở khóa ngay sau khi bạn thanh toán kích hoạt thiệp chính thức.
+            ${trialState.active
+              ? 'Bạn có thể lấy Link Dùng Thử tạm thời (tự động khóa sau khi hết hạn hoặc khi bị hủy liên kết). Link mời mang tên từng khách và xuất Excel RSVP sẽ mở khóa khi nâng cấp gói chính thức.'
+              : 'Tạo đường link gửi khách mời mang tên riêng, mẫu tin nhắn mời Zalo hàng loạt và xuất file Excel RSVP sẽ tự động mở khóa ngay sau khi bạn thanh toán kích hoạt thiệp chính thức.'}
           </p>
+          ${trialState.active ? `<button type="button" class="btn btn-outline btn-sm" style="width:100%;margin-bottom:8px;" data-trial-open-links>${trialState.linkRevoked ? 'Trạng Thái Link Thử (Đã Khóa)' : 'Lấy Link Dùng Thử / Khóa Link'}</button>` : ''}
           <button type="button" class="btn btn-gold btn-sm" style="width:100%;" data-guest-upgrade>Thanh Toán Mở Khóa Gửi Khách Ngay</button>
         </div>
       ` : `
@@ -1610,6 +1628,7 @@ export class StudioEditor {
   }
 
   bindGuestsTab(pane) {
+    pane.querySelector('[data-trial-open-links]')?.addEventListener('click', () => this.onOpenShareModal?.(this.invitation, this.mode));
     pane.querySelector('[data-guest-upgrade]')?.addEventListener('click', () => this.openCheckoutFlow());
     pane.querySelector('[data-open-form-builder]')?.addEventListener('click', () => { this.activeTab = 'client-form'; this.renderInspector(); });
     pane.querySelector('[data-zalo-tpl]')?.addEventListener('change', e => { this.selectedZaloTplIdx = Number(e.target.value); });

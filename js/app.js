@@ -197,64 +197,147 @@ function buildOwnerVietQrUrl(settings, amount = 0, memo = 'DAT THIEP CUOI') {
   return `https://img.vietqr.io/image/${encodeURIComponent(bank)}-${encodeURIComponent(acc)}-compact2.png?${qs.toString()}`;
 }
 
-function openShareLinksModal(inv, mode = 'admin') {
+function openShareLinksModal(inv, mode = 'admin', onUpdated = null) {
   if (!inv) return;
-  if (mode === 'client' && inv.order?.status !== 'paid') {
+  const isPaid = inv.order?.status === 'paid';
+  const isTrialMode = !isPaid && Boolean(inv.trial?.enabled);
+  if (mode === 'client' && !isPaid && !isTrialMode) {
     showToast('Vui lòng hoàn tất thanh toán để nhận đường link thiệp cưới chính thức.', 'info');
     return;
   }
-  const guestUrl = buildAbsoluteUrl({ role: 'guest', id: inv.id });
-  const blankUrl = buildAbsoluteUrl({ role: 'guest', id: inv.id, blank: '1' });
-  const clientUrl = buildAbsoluteUrl({ role: 'client', id: inv.id, token: inv.clientToken || '' });
 
-  openModal(`
-    <div class="modal-head">
-      <div>
-        <h3>Đường Link Chia Sẻ — ${escapeHtml(inv.title || inv.id)}</h3>
-        <small style="color:var(--ui-muted);">Tách biệt hoàn toàn quyền Quản Lý, Cổng Khách Hàng (chỉnh nội dung) và Trang Khách Mời</small>
-      </div>
-      <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
-    </div>
+  const renderShareModal = () => {
+    const trialState = getTrialState(inv);
+    const trialGuestParams = { role: 'guest', id: inv.id };
+    if (isTrialMode && trialState.shareCode) trialGuestParams.ts = trialState.shareCode;
+    const guestUrl = buildAbsoluteUrl(trialGuestParams);
+    const blankUrl = buildAbsoluteUrl({ role: 'guest', id: inv.id, blank: '1' });
+    const clientUrl = buildAbsoluteUrl({ role: 'client', id: inv.id, token: inv.clientToken || '' });
+    const lockedByAdmin = trialState.linkRevoked && trialState.revokedBy === 'admin';
+    const trialBlocked = isTrialMode && (trialState.linkRevoked || trialState.expired);
 
-    ${mode === 'admin' ? `
-      <div class="panel-card" style="padding:14px;margin-bottom:12px;background:var(--ui-surface-soft);">
-        <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ui-brand);">1. Link Cổng Khách Hàng (Gửi Cô Dâu &amp; Chú Rể tự điền nội dung / danh sách khách)</div>
-        <div style="font-size:12px;color:var(--ui-muted);margin-bottom:8px;">Khách hàng chỉ có thể đổi chữ, tải ảnh cưới, tạo câu hỏi RSVP và tạo link mời từng người — không thể sửa giao diện mẫu.</div>
-        <div class="link-box">
-          <code>${escapeHtml(clientUrl)}</code>
-          <button type="button" class="btn btn-primary btn-xs" data-copy-link="${escapeHtml(clientUrl)}">Sao chép</button>
-          <a class="btn btn-outline btn-xs" href="${escapeHtml(clientUrl)}" target="_blank">Mở thử</a>
+    openModal(`
+      <div class="modal-head">
+        <div>
+          <h3>${isTrialMode && mode === 'client' ? 'Link Dùng Thử &amp; Khóa Liên Kết' : 'Đường Link Chia Sẻ'} — ${escapeHtml(inv.title || inv.id)}</h3>
+          <small style="color:var(--ui-muted);">${isTrialMode ? 'Link dùng thử chỉ hoạt động trong thời hạn cho phép và có thể khóa hoặc hủy liên kết bất cứ lúc nào' : 'Tách biệt hoàn toàn quyền Quản Lý, Cổng Khách Hàng (chỉnh nội dung) và Trang Khách Mời'}</small>
         </div>
+        <button type="button" class="btn btn-ghost btn-sm" data-close-modal>${icon('x', 16)}</button>
       </div>
-    ` : ''}
 
-    <div class="panel-card" style="padding:14px;margin-bottom:12px;background:var(--ui-surface-soft);">
-      <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ui-success);">${mode === 'admin' ? '2.' : '1.'} Link Trang Khách Mời (Gửi cho khách mời mở thiệp, RSVP &amp; ghi lời chúc)</div>
-      <div style="font-size:12px;color:var(--ui-muted);margin-bottom:8px;">Khách mời xem thiệp hoàn chỉnh, mở bìa 3D, nghe nhạc tự phát, xác nhận tham dự và viết sổ lưu bút.</div>
-      <div class="link-box">
-        <code>${escapeHtml(guestUrl)}</code>
-        <button type="button" class="btn btn-primary btn-xs" data-copy-link="${escapeHtml(guestUrl)}">Sao chép</button>
-        <a class="btn btn-outline btn-xs" href="${escapeHtml(guestUrl)}" target="_blank">Mở thiệp</a>
-      </div>
-    </div>
-
-    ${mode === 'admin' ? `
-      <div class="panel-card" style="padding:14px;background:var(--ui-surface-soft);">
-        <div style="font-weight:700;font-size:13px;margin-bottom:4px;">3. Link Xem Mẫu Trống (0 ảnh cặp đôi, 0 tên — Gửi khách xem thuần giao diện)</div>
-        <div class="link-box">
-          <code>${escapeHtml(blankUrl)}</code>
-          <button type="button" class="btn btn-outline btn-xs" data-copy-link="${escapeHtml(blankUrl)}">Sao chép</button>
-          <a class="btn btn-outline btn-xs" href="${escapeHtml(blankUrl)}" target="_blank">Xem thử</a>
+      ${mode === 'admin' ? `
+        <div class="panel-card" style="padding:14px;margin-bottom:12px;background:var(--ui-surface-soft);">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px;color:var(--ui-brand);">1. Link Cổng Khách Hàng (Gửi Cô Dâu &amp; Chú Rể tự điền nội dung / danh sách khách)</div>
+          <div style="font-size:12px;color:var(--ui-muted);margin-bottom:8px;">Khách hàng chỉ có thể đổi chữ, tải ảnh cưới, tạo câu hỏi RSVP và tạo link mời từng người — không thể sửa giao diện mẫu.</div>
+          <div class="link-box">
+            <code>${escapeHtml(clientUrl)}</code>
+            <button type="button" class="btn btn-primary btn-xs" data-copy-link="${escapeHtml(clientUrl)}">Sao chép</button>
+            <a class="btn btn-outline btn-xs" href="${escapeHtml(clientUrl)}" target="_blank">Mở thử</a>
+          </div>
         </div>
-      </div>
-    ` : ''}
-  `, { wide: true });
+      ` : ''}
 
-  modalRoot.querySelectorAll('[data-copy-link]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      navigator.clipboard?.writeText(btn.dataset.copyLink).then(() => showToast('Đã sao chép đường link!', 'success'));
+      <div class="panel-card" style="padding:14px;margin-bottom:12px;background:${trialBlocked ? '#fff5f5' : 'var(--ui-surface-soft)'};border-color:${trialBlocked ? '#e5a3a3' : 'var(--ui-border)'};">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+          <div style="font-weight:700;font-size:13px;color:${trialBlocked ? '#9b1c28' : 'var(--ui-success)'};">
+            ${mode === 'admin' ? '2.' : '1.'} ${isTrialMode ? `Link Xem Thử Mẫu (${trialState.days} Ngày)` : 'Link Trang Khách Mời (Gửi cho khách mời mở thiệp, RSVP &amp; ghi lời chúc)'}
+          </div>
+          ${isTrialMode ? `
+            <span class="badge ${trialState.linkRevoked || trialState.expired ? 'badge-brand' : 'badge-gold'}">
+              ${trialState.linkRevoked ? (lockedByAdmin ? 'Quản trị viên đã khóa' : 'Đã khóa / hủy liên kết') : (trialState.expired ? 'Hết hạn & tự khóa' : escapeHtml(trialState.remainingText))}
+            </span>
+          ` : ''}
+        </div>
+
+        ${isTrialMode ? (
+          trialBlocked ? `
+            <div style="font-size:12.5px;color:#8a1c28;line-height:1.6;margin-bottom:10px;">
+              ${trialState.linkRevoked
+                ? (lockedByAdmin
+                  ? 'Liên kết mẫu dùng thử này đã bị <strong>Quản trị viên khóa / hủy liên kết</strong>. Mọi người mở link cũ đều bị chặn truy cập. Vui lòng thanh toán nâng cấp gói chính thức để kích hoạt lại link thiệp vĩnh viễn.'
+                  : 'Liên kết dùng thử cũ đã được <strong>khóa và hủy liên kết</strong>. Người nhận link trước đó sẽ không thể mở xem thiệp hoặc ảnh nữa.')
+                : 'Mẫu dùng thử đã <strong>hết thời hạn</strong> và liên kết xem thử đã tự động khóa. Hãy thanh toán nâng cấp gói chính thức để mở khóa lại toàn bộ ảnh &amp; nội dung bạn đã thiết kế.'}
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              ${(mode === 'admin' || (!lockedByAdmin && !trialState.expired))
+                ? `<button type="button" class="btn btn-primary btn-xs" data-trial-ctrl="unlock">Mở Lại Bằng Link Dùng Thử Mới</button>`
+                : ''}
+              ${mode === 'client' ? `<button type="button" class="btn btn-gold btn-xs" data-trial-go-checkout>Nâng Cấp Gói Chính Thức Ngay</button>` : ''}
+            </div>
+          ` : `
+            <div style="font-size:12px;color:var(--ui-muted);margin-bottom:8px;line-height:1.55;">
+              Gửi link này để người thân xem thử giao diện thiệp trong thời hạn dùng thử (có dải Bản Dùng Thử). Link sẽ <strong>tự động khóa khi hết hạn</strong> hoặc bất cứ khi nào bạn/Quản trị viên bấm <strong>Khóa &amp; Hủy Liên Kết</strong>.
+            </div>
+            <div class="link-box" style="margin-bottom:10px;">
+              <code>${escapeHtml(guestUrl)}</code>
+              <button type="button" class="btn btn-primary btn-xs" data-copy-link="${escapeHtml(guestUrl)}">Sao chép</button>
+              <a class="btn btn-outline btn-xs" href="${escapeHtml(guestUrl)}" target="_blank">Mở thử</a>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-danger btn-xs" data-trial-ctrl="lock">Khóa &amp; Hủy Liên Kết Ngay</button>
+              <button type="button" class="btn btn-outline btn-xs" data-trial-ctrl="revoke">Hủy Link Cũ &amp; Đổi Link Mới</button>
+              ${mode === 'client' ? `<button type="button" class="btn btn-gold btn-xs" data-trial-go-checkout>Nâng Cấp Gỡ Watermark</button>` : ''}
+            </div>
+          `
+        ) : `
+          <div style="font-size:12px;color:var(--ui-muted);margin-bottom:8px;">Khách mời xem thiệp hoàn chỉnh, mở bìa 3D, nghe nhạc tự phát, xác nhận tham dự và viết sổ lưu bút.</div>
+          <div class="link-box">
+            <code>${escapeHtml(guestUrl)}</code>
+            <button type="button" class="btn btn-primary btn-xs" data-copy-link="${escapeHtml(guestUrl)}">Sao chép</button>
+            <a class="btn btn-outline btn-xs" href="${escapeHtml(guestUrl)}" target="_blank">Mở thiệp</a>
+          </div>
+        `}
+      </div>
+
+      ${mode === 'admin' ? `
+        <div class="panel-card" style="padding:14px;background:var(--ui-surface-soft);">
+          <div style="font-weight:700;font-size:13px;margin-bottom:4px;">3. Link Xem Mẫu Trống (0 ảnh cặp đôi, 0 tên — Gửi khách xem thuần giao diện)</div>
+          <div class="link-box">
+            <code>${escapeHtml(blankUrl)}</code>
+            <button type="button" class="btn btn-outline btn-xs" data-copy-link="${escapeHtml(blankUrl)}">Sao chép</button>
+            <a class="btn btn-outline btn-xs" href="${escapeHtml(blankUrl)}" target="_blank">Xem thử</a>
+          </div>
+        </div>
+      ` : ''}
+    `, { wide: true });
+
+    modalRoot.querySelectorAll('[data-copy-link]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        navigator.clipboard?.writeText(btn.dataset.copyLink).then(() => showToast('Đã sao chép đường link!', 'success'));
+      });
     });
-  });
+
+    modalRoot.querySelector('[data-trial-go-checkout]')?.addEventListener('click', () => {
+      closeModal();
+      navigateTo({ role: 'checkout', id: inv.id, token: inv.clientToken || '' });
+    });
+
+    modalRoot.querySelectorAll('[data-trial-ctrl]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const op = btn.dataset.trialCtrl;
+        if (op === 'lock' && !confirm('Khóa và hủy liên kết mẫu dùng thử này? Mọi người đang có link cũ sẽ không thể mở xem thiệp nữa.')) return;
+        btn.disabled = true;
+        try {
+          const res = await storage.updateTrialLinkControl(inv.id, op, { clientToken: inv.clientToken || '' });
+          if (res?.invitation?.trial) inv.trial = res.invitation.trial;
+          if (res?.invitation?.permissions) inv.permissions = res.invitation.permissions;
+          onUpdated?.(res.invitation || inv);
+          showToast(
+            op === 'lock'
+              ? 'Đã khóa và hủy toàn bộ liên kết mẫu dùng thử!'
+              : (op === 'revoke' ? 'Đã hủy link cũ và cấp link dùng thử mới!' : 'Đã mở lại mẫu dùng thử với đường link mới!'),
+            'success'
+          );
+          renderShareModal();
+        } catch (err) {
+          showToast(err.message || 'Không thể cập nhật trạng thái liên kết', 'error');
+          btn.disabled = false;
+        }
+      });
+    });
+  };
+
+  renderShareModal();
 }
 
 /* ============================================================================
@@ -2409,7 +2492,13 @@ async function renderClientPortal(invId, token, initialTab = '') {
         else if (storage.currentUser) navigateTo({ role: 'account' });
         else navigateTo({ view: 'store' });
       },
-      onOpenShareModal: currentInv => openShareLinksModal(currentInv, 'client'),
+      onOpenShareModal: currentInv => openShareLinksModal(currentInv, 'client', updatedInv => {
+        if (activeInstance?.invitation && updatedInv?.trial) {
+          activeInstance.invitation.trial = updatedInv.trial;
+          activeInstance.invitation.permissions = updatedInv.permissions || activeInstance.invitation.permissions;
+          activeInstance.mount?.();
+        }
+      }),
       onSave: async updated => {
         await storage.clientUpdateInvitation(invId, token || res.invitation?.clientToken || '', {
           title: updated.title,
@@ -3028,11 +3117,11 @@ async function renderHandoverPage(invId, token) {
   });
 }
 
-async function renderGuestView(invId, guestName, blankMode) {
+async function renderGuestView(invId, guestName, blankMode, shareCode = '') {
   cleanupActive();
   hideChatWidget();
   try {
-    const res = await storage.getInvitation(invId, 'guest', '', { blank: blankMode });
+    const res = await storage.getInvitation(invId, 'guest', '', { blank: blankMode, shareCode });
     const inv = res.invitation;
     document.title = blankMode ? `Xem Mẫu — ${res.settings?.brandName || 'DaiLo Wedding'}` : `Thiệp Cưới ${inv.content?.groomName || ''} & ${inv.content?.brideName || ''}`;
     const renderer = new InvitationRenderer(appRoot, {
@@ -3043,8 +3132,15 @@ async function renderGuestView(invId, guestName, blankMode) {
     activeInstance = renderer;
     renderer.render(inv);
   } catch (err) {
+    const isTrialExpired = Boolean(err?.trialExpired);
+    const isLinkRevoked = Boolean(err?.linkRevoked);
     const isPaymentLocked = Boolean(err?.paymentRequired);
-    appRoot.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;"><div class="panel-card" style="max-width:440px;text-align:center;"><h2>${isPaymentLocked ? 'Thiệp Cưới Chưa Được Kích Hoạt' : 'Không Tìm Thấy Thiệp Cưới'}</h2><p style="color:var(--ui-muted);">${escapeHtml(err.message || '')}</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">${isPaymentLocked ? '<button type="button" class="btn btn-gold" data-go-account>Đăng Nhập &amp; Thanh Toán</button>' : ''}<button type="button" class="btn btn-primary" data-go-home>Xem Kho Mẫu</button></div></div></div>`;
+    const heading = isTrialExpired
+      ? 'Link Dùng Thử Đã Hết Hạn & Tự Động Khóa'
+      : (isLinkRevoked
+        ? 'Liên Kết Mẫu Dùng Thử Đã Bị Khóa / Hủy Liên Kết'
+        : (isPaymentLocked ? 'Thiệp Cưới Chưa Được Kích Hoạt' : 'Không Tìm Thấy Thiệp Cưới'));
+    appRoot.innerHTML = `<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;"><div class="panel-card" style="max-width:460px;text-align:center;"><h2>${heading}</h2><p style="color:var(--ui-muted);line-height:1.6;">${escapeHtml(err.message || '')}</p><div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">${isPaymentLocked || isLinkRevoked || isTrialExpired ? '<button type="button" class="btn btn-gold" data-go-account>Đăng Nhập &amp; Nâng Cấp Ngay</button>' : ''}<button type="button" class="btn btn-primary" data-go-home>Xem Kho Mẫu DaiLo Wedding</button></div></div></div>`;
     appRoot.querySelector('[data-go-home]')?.addEventListener('click', () => navigateTo({ view: 'store' }));
     appRoot.querySelector('[data-go-account]')?.addEventListener('click', () => navigateTo({ role: 'account' }));
   }
@@ -3058,6 +3154,7 @@ async function route() {
   const tab = sp.get('tab') || '';
   const guest = sp.get('guest') || '';
   const blank = sp.get('blank') === '1';
+  const shareCode = sp.get('ts') || '';
 
   if (role === 'admin') { await renderAdminRoute(); return; }
   if (role === 'account') { await renderCustomerAccountView(); return; }
@@ -3071,7 +3168,7 @@ async function route() {
     return;
   }
   if (role === 'client' && id) { await renderClientPortal(id, token, tab); return; }
-  if (role === 'guest' && id) { await renderGuestView(id, guest, blank); return; }
+  if (role === 'guest' && id) { await renderGuestView(id, guest, blank, shareCode); return; }
   await renderShowroom(sp.has('blank') ? blank : true);
 }
 
